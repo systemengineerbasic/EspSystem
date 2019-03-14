@@ -1,0 +1,808 @@
+#include <Wire.h>
+#include <RPR-0521RS.h>
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+#include "BluetoothSerial.h"
+#include "esp_system.h"
+#include "dev_MPU6050.h"
+#include "freertos/task.h"
+
+//====================== PIN ======================
+// Motor
+#define	IO_PIN_MOTOR_1			(14)
+#define	IO_PIN_MOTOR_2			(12)
+#define	IO_PIN_MOTOR_3			(13)
+#define	IO_PIN_MOTOR_4			(23)
+#define	IO_PIN_MOTOR_ENA		(16)
+#define	IO_PIN_MOTOR_ENB		(27)
+// LED
+#define	IO_PIN_LED				(18)
+#define	IO_PIN_LED2				(2)
+// US Sendor
+#define	IO_PIN_US_ECHO			(36)
+#define	IO_PIN_US_TRIG			( 5)
+// Servo
+#define	IO_PIN_SERVO			(25)
+// 赤外線
+#define IO_PIN_INFRARED			(19)
+// Line Tracking Sensor
+#define IO_PIN_LINETRACK_LEFT	(26)
+#define IO_PIN_LINETRACK_CENTER	(17)
+#define IO_PIN_LINETRACK_RIGHT	(39)
+// I2C
+#define IO_PIN_SDA 				SDA
+#define IO_PIN_SCL 				SCL
+
+// DACのchannel
+#define DAC_CH_MOTOR_A			(0)
+#define DAC_CH_MOTOR_B			(1)
+#define DAC_CH_SERVO			(2)
+
+
+#define	MOTOR_RIGHT_FRONT		0x01
+#define	MOTOR_RIGHT_REAR		0x02
+#define	MOTOR_LEFT_FRONT		0x04
+#define	MOTOR_LEFT_REAR			0x08
+
+#define	MOTOR_RIGHT				(MOTOR_RIGHT_FRONT|MOTOR_RIGHT_REAR)
+#define	MOTOR_LEFT				(MOTOR_LEFT_FRONT|MOTOR_LEFT_REAR)
+#define	MOTOR_FRONT				(MOTOR_RIGHT_FRONT|MOTOR_LEFT_FRONT)
+#define	MOTOR_REAR				(MOTOR_RIGHT_REAR|MOTOR_LEFT_REAR)
+
+#define	MOTOR_DIR_STOP				(0)
+#define	MOTOR_DIR_FWD				(1)
+#define	MOTOR_DIR_REV				(2)
+
+// state of motor
+#define	STATE_MOTOR_STOP				(0)
+#define	STATE_MOTOR_MOVING_FORWARD		(1)
+#define	STATE_MOTOR_MOVING_BACKWARD		(2)
+#define	STATE_MOTOR_TURNING_RIGHT		(3)
+#define	STATE_MOTOR_TURNING_LEFT		(4)
+#define	STATE_MOTOR_TURNING_RIGHT_BACK	(5)
+#define	STATE_MOTOR_TURNING_LEFT_BACK	(6)
+#define	STATE_MOTOR_ROTATING_CW			(7)
+#define	STATE_MOTOR_ROTATING_CCW		(8)
+
+#define	CTRLMODE_AUTO_DRIVE			(0)
+#define	CTRLMODE_MANUAL_DRIVE		(1)
+#define	CTRLMODE_LINE_TRACKING		(2)
+
+#define	COMMAND_CODE_STOP			(0)	// 引数なし
+#define	COMMAND_CODE_FORWARD		(1) // 引数なし
+#define	COMMAND_CODE_MOTOR_SPEED	(2)	// [1] Speed
+
+#define	MOTOR_SPEED_MIN				(40)
+#define	MOTOR_SPEED_MAX				(255)
+
+typedef struct {
+	int		event;
+	int		param1;
+} _t_queue_event;
+
+//BluetoothSerial SerialBT;
+
+RPR0521RS rpr0521rs;
+
+int		g_log_level = 3; // 表示するlogのレベル(0～99)
+float g_proficiency_score = 0.0;	// 熟練度
+QueueHandle_t g_xQueue_Serial;
+
+
+
+int	g_state_motor = STATE_MOTOR_STOP;
+int g_motor_speed = 170;
+int g_motor_speed_on_left_turn = 230;
+int g_motor_speed_on_right_turn = 230;
+int g_lr_level_on_left_turn = 90;
+int g_lr_level_on_right_turn = 110;
+int g_motor_speed_right;
+int g_motor_speed_left;
+int	g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+
+int g_stop_distance = 20;	// [cm]
+
+float servo_coeff_a;
+float servo_coeff_b;
+
+SemaphoreHandle_t g_xMutex = NULL;
+
+#if 1
+// Wifi アクセスポイントの情報
+const char* ssid = "SPWH_H32_F37CDD"; // WiFiルータ1
+//const char* ssid = "SPWH_H32_5AE424"; // WiFiルータ2
+const char* password = "********";
+//const char* password = "19iyteirq5291f2"; // WiFiルータ1
+//const char* password = "jaffmffm04mf01i"; // WiFiルータ2
+
+// 自分で設定した CloudMQTT.xom サイトの Instance info から取得
+const char* mqttServer = "m16.cloudmqtt.com";
+const char* mqttDeviceId = "KMCar001";
+const char* mqttUser = "vsscjrry";
+const char* mqttPassword = "kurgC_M_VZmF";
+const int mqttPort = 17555;
+
+// Subscribe する MQTT Topic 名
+const char* mqttTopic_Signal = "KM/Signal";
+const char* mqttTopic_Sensor = "KM/Sensor";
+const char* mqttTopic_Status = "KM/Status";
+const char* mqttTopic_Command = "KM/Command";
+const char* mqttTopic_Param = "KM/Param";
+const char* mqttTopic_Query = "KM/Query";
+
+//Connect WiFi Client and MQTT(PubSub) Client
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+/* 
+ *  Subscribe している Topic にメッセージが来た時に処理させる Callback 関数を設定。
+ *  ここでは単にメッセージを取り出しているだけ。
+ *  JSON 形式にしてるけど、あんまり必要なさそうであれば、Topic と Message だけで判別させたい。
+ *  でも JSON 形式にしておくと、後から判別させたりする際に使いやすいから、どうするか。
+ */
+void callback_MQTT(char* topic, byte* payload, unsigned int length) 
+{
+	//----- JSON形式のデータを取り出す
+	StaticJsonDocument<200> doc;
+	// Deserialize
+	deserializeJson(doc, payload);
+	// extract the data
+	JsonObject object = doc.as<JsonObject>();
+	if(strcmp(topic, mqttTopic_Signal) == 0) {
+		const char* led = object["LED"];
+		if(led != NULL) {
+			if(strcmp(led, "GREEN") == 0) {
+				digitalWrite(IO_PIN_LED2, HIGH);
+			}
+			else if(strcmp(led, "RED") == 0) {
+				digitalWrite(IO_PIN_LED2, LOW);
+			}
+		}
+	}
+
+	if(strcmp(topic, mqttTopic_Command) == 0) {
+		if(!object["Stop"].isNull()) {
+			int getstr = 's';
+			xQueueSend(g_xQueue_Serial, &getstr, 100);
+		}
+		if(!object["MotorSpeed"].isNull()) {
+			int speed = object["MotorSpeed"].as<int>();
+			if((MOTOR_SPEED_MIN<=speed) && (speed<=MOTOR_SPEED_MAX)) {
+				g_motor_speed = speed;
+			}
+		}
+		if(!object["MotorSpeedLR"].isNull()) {
+			int left = object["MotorSpeedLR"][0].as<int>();
+			int right = object["MotorSpeedLR"][1].as<int>();
+			int left_l = object["MotorSpeedLR"][2].as<int>();
+			int right_l = object["MotorSpeedLR"][3].as<int>();
+			if((MOTOR_SPEED_MIN<=left) && (left<=MOTOR_SPEED_MAX)) {
+				g_motor_speed_on_left_turn = left;
+			}
+			if((MOTOR_SPEED_MIN<=right) && (right<=MOTOR_SPEED_MAX)) {
+				g_motor_speed_on_right_turn = right;
+			}
+			if((0<=left_l) && (left_l<=MOTOR_SPEED_MAX)) {
+				g_lr_level_on_left_turn = left_l;
+			}
+			if((0<=right_l) && (right_l<=MOTOR_SPEED_MAX)) {
+				g_lr_level_on_right_turn = right_l;
+			}
+		}
+	}
+
+	if(strcmp(topic, mqttTopic_Query) == 0) {
+		if(!object["Id"].isNull()) {
+			const char* code = object["Id"];
+			if(strcmp(code, "Param") == 0) {
+				doc["MtSpd"] = g_motor_speed;
+				doc["MtSpd_LT"] = g_motor_speed_on_left_turn;
+				doc["MtSpd_RT"] = g_motor_speed_on_right_turn;
+				doc["MtLv_LT"] = g_lr_level_on_left_turn;
+				doc["MtLv_RT"] = g_lr_level_on_right_turn;
+				char payload[200];
+				serializeJson(doc, payload);
+				client.publish(mqttTopic_Param, payload);
+			}
+		}
+	}
+}
+
+// MQTT Client が接続できなかったら接続できるまで再接続を試みるための MQTT_reconnect 関数
+void MQTT_reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect(mqttDeviceId, mqttUser, mqttPassword)) {
+      Serial.println("connected");
+      client.subscribe(mqttTopic_Signal);
+      client.subscribe(mqttTopic_Command);
+      client.subscribe(mqttTopic_Query);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5sec before retrying
+      vTaskDelay(5000);
+    }
+  }
+}
+#endif
+
+void LOG_output(const char str[], int level=99)
+{
+	if(g_log_level <= level) {
+		Serial.println(str);
+	}	
+}
+
+void SERVO_set_angle(int angle)
+{
+	if(angle < -90.0) {
+		angle = -90.0;
+	}
+	if(angle > 90.0) {
+		angle = 90.0;
+	}
+	angle -= 10;
+
+	int val = (int)(servo_coeff_a*angle + servo_coeff_b);
+	ledcWrite(DAC_CH_SERVO, val);
+	vTaskDelay(500);
+	ledcWrite(DAC_CH_SERVO, 0);	
+}
+
+float SR04_get_distance(unsigned long max_dist=100)   // return:[cm](timeout発生時は10000.0)  max_dist:[cm]
+{
+	// Pulse発生
+	digitalWrite(IO_PIN_US_TRIG, LOW);   
+	delayMicroseconds(2);
+	digitalWrite(IO_PIN_US_TRIG, HIGH);  
+	delayMicroseconds(20);
+	digitalWrite(IO_PIN_US_TRIG, LOW);   
+	
+	// 反射波到達までの時間計測(timeout発生時は0)
+	unsigned long duration = pulseIn(IO_PIN_US_ECHO, HIGH, max_dist*58);  
+	float dist;
+	if(duration == 0) {
+		dist = 10000.0;
+	}
+	else {
+		dist = duration * 0.017; // [cm]
+	}
+
+	return dist;
+}  
+
+void MOTOR_set_speed_left(int dir, int speed)
+{
+	ledcWrite(DAC_CH_MOTOR_A, speed);  
+	g_motor_speed_right = speed;
+
+	if(dir == MOTOR_DIR_FWD) {
+		digitalWrite(IO_PIN_MOTOR_1,HIGH);
+		digitalWrite(IO_PIN_MOTOR_2,LOW);
+	}
+	else if(dir == MOTOR_DIR_REV) {
+		digitalWrite(IO_PIN_MOTOR_1,LOW);
+		digitalWrite(IO_PIN_MOTOR_2,HIGH);
+	}
+}
+
+void MOTOR_set_speed_right(int dir, int speed)
+{
+	ledcWrite(DAC_CH_MOTOR_B, speed);  
+	g_motor_speed_left = speed;
+
+	if(dir == MOTOR_DIR_FWD) {
+		digitalWrite(IO_PIN_MOTOR_3,LOW);
+		digitalWrite(IO_PIN_MOTOR_4,HIGH);
+	}
+	else if(dir == MOTOR_DIR_REV) {
+		digitalWrite(IO_PIN_MOTOR_3,HIGH);
+		digitalWrite(IO_PIN_MOTOR_4,LOW);
+	}
+}
+
+int _us_get_distance()   // return:[cm](timeout発生時は10000)
+{
+	float dist; 
+	float dist_sum = 0.0; 
+	int i;
+	for(i = 0; i < 5; i ++) {
+		dist = SR04_get_distance(50); 
+		if(dist > 9000.0) {
+			// timeoutが一度でも計測されたときは前方に何もないと見なす
+			return	10000;
+		}
+		dist_sum += dist;
+	}
+	
+	return	(int)(dist_sum*0.2); // 5で割る代わりに0.2を掛ける
+}
+
+void _move_forward(int speed)
+{
+	MOTOR_set_speed_right(MOTOR_DIR_FWD, speed);
+	MOTOR_set_speed_left(MOTOR_DIR_FWD, speed);
+	
+	g_state_motor = STATE_MOTOR_MOVING_FORWARD;
+	
+	LOG_output("go forward", 1);
+}
+
+void _move_backward(int speed)
+{
+	MOTOR_set_speed_right(MOTOR_DIR_REV, speed);
+	MOTOR_set_speed_left(MOTOR_DIR_REV, speed);
+	
+	g_state_motor = STATE_MOTOR_MOVING_BACKWARD;
+	
+	LOG_output("go backward", 1);
+}
+
+void _turn_left(int dir, int speed, int level)
+{
+	if(level < 0) {
+		level = 0;
+	}
+	int speed_right = speed;
+	int speed_left = speed - level;
+	if(speed_left < 0) {
+		speed_left = 0;
+	}
+		
+	MOTOR_set_speed_right(dir, speed_right);
+	MOTOR_set_speed_left(dir, speed_left);
+
+	g_state_motor = (dir==MOTOR_DIR_FWD) ? STATE_MOTOR_TURNING_LEFT : STATE_MOTOR_TURNING_LEFT_BACK;
+	
+	LOG_output("turn left!", 1);
+}
+
+void _turn_right(int dir, int speed, int level)
+{
+	if(level < 0) {
+		level = 0;
+	}
+	int speed_right = speed - level;
+	int speed_left = speed;
+	if(speed_right < 0) {
+		speed_right = 0;
+	}
+	MOTOR_set_speed_right(dir, speed_right);
+	MOTOR_set_speed_left(dir, speed_left);
+	
+	g_state_motor = (dir==MOTOR_DIR_FWD) ? STATE_MOTOR_TURNING_RIGHT : STATE_MOTOR_TURNING_RIGHT_BACK;
+	
+	LOG_output("turn right!", 1);
+}
+
+void _rotate_ccw(int speed)
+{
+	MOTOR_set_speed_right(MOTOR_DIR_FWD, speed);
+	MOTOR_set_speed_left(MOTOR_DIR_REV, speed);
+	
+	g_state_motor = STATE_MOTOR_ROTATING_CCW;
+	
+	LOG_output("rotate ccw!", 1);
+}
+
+void _rotate_cw(int speed)
+{
+	MOTOR_set_speed_right(MOTOR_DIR_REV, speed);
+	MOTOR_set_speed_left(MOTOR_DIR_FWD, speed);
+	
+	g_state_motor = STATE_MOTOR_ROTATING_CW;
+	
+	LOG_output("rotate cw!", 1);
+}
+
+void _stop()
+{
+	MOTOR_set_speed_left(0, 0);
+	MOTOR_set_speed_right(0, 0);
+
+	g_state_motor = STATE_MOTOR_STOP;
+
+	LOG_output("Stop!", 1);
+}
+
+float	g_temperature = 0.0;
+float	g_max_diff_axl = 0.0;
+unsigned short g_ps_val;
+float g_als_val;
+void _Task_sensor(void* param)
+{
+	int error;
+	float	acc_x, acc_y, acc_z;
+	float	gyro_x, gyro_y, gyro_z;
+	BaseType_t xStatus;
+	byte rc;
+	float pre_abs_axl = 0;
+
+	xSemaphoreGive(g_xMutex);
+	for(;;) {
+		vTaskDelay(50);
+
+		// 加速度、角速度、温度を取得
+		error = MPU6050_get_all(&acc_x, &acc_y, &acc_z, &gyro_x, &gyro_y, &gyro_z, &g_temperature);
+		// 衝撃検出
+		float abs_axl = (acc_x*acc_x + acc_y*acc_y + acc_z*acc_z);
+		float diff_axl = abs_axl - pre_abs_axl;
+		if(diff_axl < 0) {
+			diff_axl = -diff_axl;
+		}
+		pre_abs_axl = abs_axl;
+
+		// 照度・近接センサの値を取得
+		unsigned short ps_val;
+		float als_val;
+		rc = rpr0521rs.get_psalsval(&ps_val, &als_val);
+		if(rc == 0) {
+		}
+
+		if(diff_axl < 0.5) {
+			digitalWrite(IO_PIN_LED,LOW);
+		}
+		else {
+			digitalWrite(IO_PIN_LED,HIGH);
+			if(diff_axl > 1.5) { // 衝撃が大きかった時はstopさせる
+				int getstr = 's';
+				xQueueSend(g_xQueue_Serial, &getstr, 100);
+			}
+		}
+
+		if(als_val > 10.0) {
+			digitalWrite(IO_PIN_LED2,LOW);
+		}
+		else {
+			digitalWrite(IO_PIN_LED2,HIGH);
+		}
+
+		// ▼▼▼ [排他制御区間]開始 ▼▼▼
+		xStatus = xSemaphoreTake(g_xMutex, 0);
+		if(diff_axl > g_max_diff_axl) {
+			g_max_diff_axl = diff_axl;
+		}
+		g_ps_val = ps_val;
+		g_als_val = als_val;
+		xSemaphoreGive(g_xMutex);
+		// ▲▲▲ [排他制御区間]開始 ▲▲▲
+	}
+
+}
+
+void _Task_WiFi(void* param)
+{
+	for(;;) {
+		vTaskDelay(200);
+
+		if (!client.connected()) {
+			MQTT_reconnect();
+		}
+		client.loop();
+	}
+
+}
+
+void _Task_disp(void* param)
+{
+	BaseType_t xStatus;
+	float	temperature = 0.0;
+	float	max_diff_axl = 0.0;
+	unsigned short ps_val;
+	float als_val;
+	portTickType wakeupTime = xTaskGetTickCount();
+	int		count = 0;
+
+	xSemaphoreGive(g_xMutex);
+	for(;;) {
+		vTaskDelayUntil(&wakeupTime, 3000);
+		
+		// ▼▼▼ [排他制御区間]開始 ▼▼▼
+		xStatus = xSemaphoreTake(g_xMutex, 0);
+		temperature = g_temperature;
+		max_diff_axl = g_max_diff_axl;
+		ps_val = g_ps_val;
+		als_val = g_als_val;
+		g_max_diff_axl = 0.0; // リセット
+		xSemaphoreGive(g_xMutex);
+		// ▲▲▲ [排他制御区間]開始 ▲▲▲
+		
+		g_proficiency_score += max_diff_axl;
+
+		// 熟練度表示
+		count ++;
+		if(count > 10) {
+			count = 0;
+			Serial.print("Score = ");
+			Serial.print(g_proficiency_score, 2);
+			Serial.println();
+		}
+
+		//----- センサ値をMTQQ brokerへpublis
+		// JSONフォーマット作成
+		StaticJsonDocument<200> doc_in;
+		doc_in["AxlDiff"] = max_diff_axl;
+		doc_in["Temp"] = temperature;
+		doc_in["Bright"] = als_val;
+		doc_in["Prox"] = ps_val;
+		doc_in["P-Score"] = g_proficiency_score;
+		// payloadにセットされたJSON形式メッセージをpublish
+		char payload[200];
+		serializeJson(doc_in, payload);
+		client.publish(mqttTopic_Sensor, payload);
+	}
+	
+}
+
+void _Task_robo_car(void* param)
+{
+	BaseType_t xStatus;
+
+	for(;;) {
+		int getstr = 0;
+		xStatus = xQueueReceive(g_xQueue_Serial, &getstr, portMAX_DELAY);
+		if(xStatus == pdPASS) {
+			if(getstr == 'a') {
+				g_ctrl_mode = CTRLMODE_AUTO_DRIVE;
+				_stop();
+			}
+			else if(getstr == 'm') {
+				g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+				_stop();
+			}
+
+			if(g_ctrl_mode == CTRLMODE_MANUAL_DRIVE) {
+				if(getstr=='f') {
+					_move_forward(g_motor_speed);
+				}
+				else if(getstr=='b') {
+					_move_backward(g_motor_speed);
+				}
+				else if(getstr=='l') {
+					_rotate_ccw(g_motor_speed);
+				}
+				else if(getstr=='r') {
+					_rotate_cw(g_motor_speed);
+				}
+				else if(getstr=='L') {
+					_turn_left(MOTOR_DIR_FWD, g_motor_speed_on_left_turn, g_lr_level_on_left_turn);
+				}
+				else if(getstr=='R') {
+					_turn_right(MOTOR_DIR_FWD, g_motor_speed_on_right_turn, g_lr_level_on_right_turn); // 微調整
+				}
+				else if(getstr=='C') {
+					_turn_left(MOTOR_DIR_REV, g_motor_speed_on_left_turn, g_lr_level_on_left_turn);
+				}
+				else if(getstr=='D') {
+					_turn_right(MOTOR_DIR_REV, g_motor_speed_on_right_turn, g_lr_level_on_right_turn);
+				}
+				else if(getstr=='s') {
+					_stop();		 
+				}
+			}
+			else if(g_ctrl_mode == CTRLMODE_AUTO_DRIVE) {
+				int right_distance = 0, left_distance = 0, middle_distance = 0;
+
+				if(getstr=='s') {
+					g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+					_stop();		 
+				}		
+				else {
+					middle_distance = _us_get_distance();
+
+					if(middle_distance <= g_stop_distance) {     
+						_stop();
+						vTaskDelay(500); 	  
+						SERVO_set_angle(-80);  
+						vTaskDelay(1000);      
+						right_distance = _us_get_distance();
+
+						vTaskDelay(500);
+						SERVO_set_angle(0);              
+						vTaskDelay(1000);                                                  
+						SERVO_set_angle(80);              
+						vTaskDelay(1000); 
+						left_distance = _us_get_distance();
+
+						vTaskDelay(500);
+						SERVO_set_angle(0);              
+						vTaskDelay(1000);
+						if((right_distance<=g_stop_distance) && (left_distance<=g_stop_distance)) {
+							_move_backward(g_motor_speed);
+							vTaskDelay(180);
+						}
+						else if((right_distance>9000) && (left_distance>9000)) {
+							_rotate_cw(180); // CW/CCWのどちらでもよい
+							vTaskDelay(500);
+						}
+						else if(right_distance>left_distance) {
+							_rotate_cw(180);
+							vTaskDelay(500);
+						}
+						else if(right_distance<left_distance) {
+							_rotate_ccw(150);
+							vTaskDelay(500);
+						}
+						else {
+							_move_forward(g_motor_speed);
+						}
+					}  
+					else {
+						_move_forward(g_motor_speed);
+					}
+				}
+			}
+		}
+		else {
+			Serial.println("[Error] Queue");
+			if(uxQueueMessagesWaiting(g_xQueue_Serial) != 0) {
+				while(1) {
+					Serial.println("rtos queue receive error, stopped");
+					vTaskDelay(1000);
+				}
+			}
+		}
+	}
+	
+}
+
+void _Task_Serial(void* param)
+{
+	BaseType_t xStatus;
+
+	for(;;) {
+		vTaskDelay(30);
+		
+		int getstr = -1;
+		if (Serial.available() > 0) { // 受信したデータが存在する
+			// Serial Portから一文字読み込み
+			getstr = Serial.read();
+		}
+
+		// 障害物検出
+		int dist = _us_get_distance();
+	    if(dist <= g_stop_distance) {
+			if((g_state_motor==STATE_MOTOR_MOVING_FORWARD) || 
+				(g_state_motor==STATE_MOTOR_TURNING_RIGHT) ||
+				(g_state_motor==STATE_MOTOR_TURNING_LEFT)) 
+			{
+				getstr = 's';
+			}
+		}
+
+		if(getstr != -1) {
+	        xStatus = xQueueSend(g_xQueue_Serial, &getstr, 100);
+	        if(xStatus != pdPASS) {
+				Serial.println(getstr);
+			}
+		}
+	}
+
+}
+
+void setup()
+{
+	byte rc;
+
+	g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+
+	// Serial Port(USB) 初期設定(115200bpsだとBluetoothが正しく通信できない)
+	Serial.begin(9600);
+	// Bluetooth 初期設定
+	//SerialBT.begin("ESP32");
+	// I2C 初期設定
+	Wire.begin(IO_PIN_SDA, IO_PIN_SCL);
+	// WiFi初期設定
+	WiFi.begin(ssid, password);
+	int cnt = 0;
+	int is_success = true;
+	while (WiFi.status() != WL_CONNECTED) {
+		delay(500);
+		Serial.print("Connecting to ");
+		Serial.println(ssid);
+		cnt ++;
+		if(cnt > 30) {
+			is_success = false;
+			break;
+		}
+	}
+	if(is_success) {
+		Serial.println("Connected to the WiFi network.");
+		// WiFi アクセスポイントから付与されたIPアドレス
+		Serial.print("WiFi connected IP address: ");
+		Serial.println(WiFi.localIP());
+		// MQTT Serverの設定
+		client.setServer(mqttServer, mqttPort);
+		// topicをsubscribeしたときのコールバック関数を登録
+		client.setCallback(callback_MQTT);
+		// MQTT brokerとの接続
+		MQTT_reconnect();
+	}
+	else {
+		Serial.println("[Errol] Cannot connected to the WiFi network");
+	}
+
+
+	pinMode(IO_PIN_US_ECHO, INPUT);    
+	pinMode(IO_PIN_US_TRIG, OUTPUT);  
+	pinMode(IO_PIN_LED, OUTPUT);
+	pinMode(IO_PIN_LED2, OUTPUT);
+	pinMode(IO_PIN_MOTOR_1,OUTPUT);
+	pinMode(IO_PIN_MOTOR_2,OUTPUT);
+	pinMode(IO_PIN_MOTOR_3,OUTPUT);
+	pinMode(IO_PIN_MOTOR_4,OUTPUT);
+	pinMode(IO_PIN_MOTOR_ENA,OUTPUT);
+	pinMode(IO_PIN_MOTOR_ENB,OUTPUT);
+	pinMode(IO_PIN_SERVO,OUTPUT);
+	pinMode(IO_PIN_LINETRACK_LEFT, INPUT);    
+	pinMode(IO_PIN_LINETRACK_CENTER, INPUT);    
+	pinMode(IO_PIN_LINETRACK_RIGHT, INPUT);    
+
+	// Motorの初期設定
+	ledcSetup(DAC_CH_MOTOR_A, 980, 8);
+	ledcSetup(DAC_CH_MOTOR_B, 980, 8);
+	ledcAttachPin(IO_PIN_MOTOR_ENA, DAC_CH_MOTOR_A);
+	ledcAttachPin(IO_PIN_MOTOR_ENB, DAC_CH_MOTOR_B);
+
+	_stop();
+
+	// Servoの初期設定
+	float servo_min = 26.0;  // (26/1024)*20ms ≒ 0.5 ms  (-90°)
+	float servo_max = 123.0; // (123/1024)*20ms ≒ 2.4 ms (+90°)
+	servo_coeff_a = (servo_max-servo_min)/180.0;
+	servo_coeff_b = (servo_max+servo_min)/2.0;
+	ledcSetup(DAC_CH_SERVO, 50, 10);  // 0ch 50 Hz 10bit resolution
+	ledcAttachPin(IO_PIN_SERVO, DAC_CH_SERVO); 
+
+    SERVO_set_angle(0);//********xxxxx setservo position according to scaled value
+    delay(500); 
+
+  	// 照度・近接センサの初期設定
+	rc = rpr0521rs.init();
+	if(rc != 0) {
+		Serial.println("[Error] cannot initialize RPR-0521.");
+	}
+
+	// 加速度センサ初期化
+	MPU6050_init(&Wire);
+
+	// LED点灯
+	for(int i = 0; i < 3; i ++) {
+		digitalWrite(IO_PIN_LED, HIGH);
+		delay(1000);
+		digitalWrite(IO_PIN_LED, LOW);
+		delay(1000);
+	}
+
+	// コア0で関数task0をstackサイズ4096,優先順位1(大きいほど優先度高)で起動
+	g_xQueue_Serial = xQueueCreate(8, sizeof(int32_t));
+
+	g_xMutex = xSemaphoreCreateMutex();
+	xTaskCreatePinnedToCore(_Task_sensor, "Task_sensor", 2048, NULL, 5, NULL, 0);
+	xTaskCreatePinnedToCore(_Task_WiFi, "Task_WiFi", 2048, NULL, 2, NULL, 0);
+	xTaskCreatePinnedToCore(_Task_disp, "Task_disp", 2048, NULL, 1, NULL, 0);
+	xTaskCreatePinnedToCore(_Task_robo_car, "Task_robo_car", 2048, NULL, 3, NULL, 0);
+	xTaskCreatePinnedToCore(_Task_Serial, "Task_Serial", 2048, NULL, 4, NULL, 0);
+
+	// payloadにセットされたJSON形式メッセージを投稿
+	char text[200];
+	sprintf(text, "{\"Init\":\"Pass\"}");
+	client.publish(mqttTopic_Status, text);
+
+	Serial.println("Completed setup program successfully.");
+}
+
+void loop()
+{
+
+
+}
+
+
