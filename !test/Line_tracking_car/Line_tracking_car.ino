@@ -180,6 +180,7 @@ void loop()
 */
 	delay(10);	
 	int event = create_event();
+//	int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
 	int next_state = g_next_event_table[event][g_cur_state];
 	
 	if(next_state != g_cur_state) {
@@ -195,6 +196,7 @@ void loop()
 		}
 		else if(next_state == STATE_STOP) {
 			stop();
+			delay(1000);
 		}
 		
 		g_cur_state = next_state;
