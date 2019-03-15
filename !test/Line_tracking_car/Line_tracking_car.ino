@@ -49,20 +49,21 @@ enum {
 	STATE_TURN_LEFT = 0,	
 	STATE_GO_FORWARD,	
 	STATE_TURN_RIGHT,	
+	STATE_STOP,	
 
 	STATE_NUM	
 };
 
 int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
-	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,
-	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,
-	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
-	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,
+	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
+	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
+	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
+	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+	STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
 };
 
 void forward()
@@ -76,43 +77,41 @@ void forward()
 	Serial.println("go forward!");
 }
 
-void back(){
+void back()
+{
 	ledcWrite(0, carSpeed);  
 	ledcWrite(1, carSpeed);  
-//  analogWrite(ENA, carSpeed);
-//  analogWrite(ENB, carSpeed);
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-  Serial.println("go back!");
+	digitalWrite(IN1, LOW);
+	digitalWrite(IN2, HIGH);
+	digitalWrite(IN3, HIGH);
+	digitalWrite(IN4, LOW);
+	Serial.println("go back!");
 }
 
-void left(){
+void left()
+{
 	ledcWrite(0, carSpeed);  
 	ledcWrite(1, carSpeed);  
-//  analogWrite(ENA, carSpeed);
-//  analogWrite(ENB, carSpeed);
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-  Serial.println("go left!");
+	digitalWrite(IN1, LOW);
+	digitalWrite(IN2, HIGH);
+	digitalWrite(IN3, LOW);
+	digitalWrite(IN4, HIGH);
+	Serial.println("go left!");
 }
 
-void right(){
+void right()
+{
 	ledcWrite(0, carSpeed);  
 	ledcWrite(1, carSpeed);  
-//  analogWrite(ENA, carSpeed);
-//  analogWrite(ENB, carSpeed);
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW); 
-  Serial.println("go right!");
+	digitalWrite(IN1, HIGH);
+	digitalWrite(IN2, LOW);
+	digitalWrite(IN3, HIGH);
+	digitalWrite(IN4, LOW); 
+	Serial.println("go right!");
 } 
 
-void stop(){
+void stop()
+{
    digitalWrite(ENA, LOW);
    digitalWrite(ENB, LOW);
    Serial.println("Stop!");
@@ -168,6 +167,9 @@ void loop()
 		}
 		else if(next_state == STATE_TURN_RIGHT) {
 			right();
+		}
+		else if(next_state == STATE_STOP) {
+			stop();
 		}
 		
 		g_cur_state = next_state;
