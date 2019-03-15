@@ -26,18 +26,54 @@
 #define IN3 13
 #define IN4 23
 
+// LED
+#define	IO_PIN_LED				(18)
+#define	IO_PIN_LED2				(2)
+
 #define carSpeed 150
 
-void forward(){
+enum {
+	TRACK_EVENT_XXX	= 0,
+	TRACK_EVENT_XXO,
+	TRACK_EVENT_XOX,
+	TRACK_EVENT_XOO,
+	TRACK_EVENT_OXX,
+	TRACK_EVENT_OXO,
+	TRACK_EVENT_OOX,
+	TRACK_EVENT_OOO,
+
+	TRACK_EVENT_NUM
+};
+
+enum {
+	STATE_TURN_LEFT = 0,	
+	STATE_GO_FORWARD,	
+	STATE_TURN_RIGHT,	
+
+	STATE_NUM	
+};
+
+int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
+{
+	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,
+	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,
+	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
+	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,
+};
+
+void forward()
+{
 	ledcWrite(0, carSpeed);  
 	ledcWrite(1, carSpeed);  
-//  analogWrite(ENA, carSpeed);
-//  analogWrite(ENB, carSpeed);
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-  Serial.println("go forward!");
+	digitalWrite(IN1, HIGH);
+	digitalWrite(IN2, LOW);
+	digitalWrite(IN3, LOW);
+	digitalWrite(IN4, HIGH);
+	Serial.println("go forward!");
 }
 
 void back(){
@@ -82,25 +118,34 @@ void stop(){
    Serial.println("Stop!");
 } 
 
-void setup(){
-  Serial.begin(9600);
-  pinMode(39,INPUT);
-  pinMode(17,INPUT);
-  pinMode(26,INPUT);
-  pinMode(ENA,OUTPUT);
-  pinMode(ENB,OUTPUT);
-  pinMode(IN1,OUTPUT);
-  pinMode(IN2,OUTPUT);
-  pinMode(IN3,OUTPUT);
-  pinMode(IN4,OUTPUT);
+int	g_cur_state = STATE_GO_FORWARD;
+void setup()
+{
+	Serial.begin(9600);
+	pinMode(39,INPUT);
+	pinMode(17,INPUT);
+	pinMode(26,INPUT);
+	pinMode(IO_PIN_LED,OUTPUT);
+	pinMode(ENA,OUTPUT);
+	pinMode(ENB,OUTPUT);
+	pinMode(IN1,OUTPUT);
+	pinMode(IN2,OUTPUT);
+	pinMode(IN3,OUTPUT);
+	pinMode(IN4,OUTPUT);
 
 	ledcSetup(0, 980, 8);
 	ledcSetup(1, 980, 8);
 	ledcAttachPin(ENA, 0);
 	ledcAttachPin(ENB, 1);
+
+	forward();
+	g_cur_state = STATE_GO_FORWARD;
+
+	digitalWrite(IO_PIN_LED,HIGH);
 }
 
-void loop() {
+void loop() 
+{
 /*
 	Serial.print("");
 	Serial.print(LT_L);
@@ -111,17 +156,21 @@ void loop() {
 	Serial.println();
 	delay(500);	
 */
-
-  if(LT_M){
-   	forward();
-  }
-  else if(LT_R) { 
-    right();
-    while(LT_R);                             
-  }   
-  else if(LT_L) {
-    left();
-    while(LT_L);  
-  }
+	int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+	int next_state = g_next_event_table[event][g_cur_state];
+	
+	if(next_state != g_cur_state) {
+		if(next_state == STATE_TURN_LEFT) {
+			left();
+		}
+		else if(next_state == STATE_GO_FORWARD) {
+			forward();
+		}
+		else if(next_state == STATE_TURN_RIGHT) {
+			right();
+		}
+		
+		g_cur_state = next_state;
+	}
 }
 
