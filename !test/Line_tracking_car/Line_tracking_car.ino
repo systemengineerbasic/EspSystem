@@ -112,9 +112,11 @@ void right()
 
 void stop()
 {
-   digitalWrite(ENA, LOW);
-   digitalWrite(ENB, LOW);
-   Serial.println("Stop!");
+	ledcWrite(0, 0);  
+	ledcWrite(1, 0);  
+	digitalWrite(ENA, LOW);
+	digitalWrite(ENB, LOW);
+	Serial.println("Stop!");
 } 
 
 int	g_cur_state = STATE_GO_FORWARD;
@@ -143,6 +145,27 @@ void setup()
 	digitalWrite(IO_PIN_LED,HIGH);
 }
 
+int create_event()
+{
+	int count = 0;
+	int pre_event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+	for(int i = 0; i < 500; i ++) {
+		int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+		if(event == pre_event) {
+			count ++;
+		}
+		else {
+			count = 0;
+		}
+		pre_event = event;
+		if(count > 50) {
+			break;
+		}
+	}
+	
+	return	pre_event;
+}
+
 void loop() 
 {
 /*
@@ -155,10 +178,12 @@ void loop()
 	Serial.println();
 	delay(500);	
 */
-	int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+	delay(10);	
+	int event = create_event();
 	int next_state = g_next_event_table[event][g_cur_state];
 	
 	if(next_state != g_cur_state) {
+		Serial.println(next_state);
 		if(next_state == STATE_TURN_LEFT) {
 			left();
 		}
