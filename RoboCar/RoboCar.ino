@@ -635,148 +635,133 @@ void stop()
 
 void _Task_robo_car(void* param)
 {
-	BaseType_t xStatus;
 	portTickType 	wait_tick = portMAX_DELAY;
 
 	for(;;) {
 		int getstr = 0;
-		xStatus = xQueueReceive(g_xQueue_Serial, &getstr, wait_tick);
-		if(1) {
-//		if(xStatus == pdPASS) {
-			//----- ModeêÿÇËë÷Ç¶ -----
-			if(getstr == 'a') {
-				g_ctrl_mode = CTRLMODE_AUTO_DRIVE;
-				wait_tick = portMAX_DELAY;
-				_stop();
+		BaseType_t	xStatus = xQueueReceive(g_xQueue_Serial, &getstr, wait_tick);
+		//----- ModeêÿÇËë÷Ç¶ -----
+		if(getstr == 'a') {
+			g_ctrl_mode = CTRLMODE_AUTO_DRIVE;
+			wait_tick = portMAX_DELAY;
+			_stop();
+		}
+		else if(getstr == 'm') {
+			g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+			wait_tick = portMAX_DELAY;
+			_stop();
+		}
+		else if(getstr == 't') {
+			Serial.println("Trace!");
+
+			g_ctrl_mode = CTRLMODE_LINE_TRACKING;
+			wait_tick = 10/portTICK_RATE_MS; // 10[ms]
+			Serial.print("Trace!");
+			Serial.println(wait_tick);
+			stop();		 
+		}
+
+		//----- RoboCarêßå‰ -----
+		if(g_ctrl_mode == CTRLMODE_MANUAL_DRIVE) {
+			if(getstr=='f') {
+				_move_forward(g_motor_speed);
 			}
-			else if(getstr == 'm') {
+			else if(getstr=='b') {
+				_move_backward(g_motor_speed);
+			}
+			else if(getstr=='l') {
+				_rotate_ccw(g_motor_speed);
+			}
+			else if(getstr=='r') {
+				_rotate_cw(g_motor_speed);
+			}
+			else if(getstr=='L') {
+				_turn_left(MOTOR_DIR_FWD, g_motor_speed_on_left_turn, g_lr_level_on_left_turn);
+			}
+			else if(getstr=='R') {
+				_turn_right(MOTOR_DIR_FWD, g_motor_speed_on_right_turn, g_lr_level_on_right_turn); // î˜í≤êÆ
+			}
+			else if(getstr=='C') {
+				_turn_left(MOTOR_DIR_REV, g_motor_speed_on_left_turn, g_lr_level_on_left_turn);
+			}
+			else if(getstr=='D') {
+				_turn_right(MOTOR_DIR_REV, g_motor_speed_on_right_turn, g_lr_level_on_right_turn);
+			}
+			else if(getstr=='s') {
+				_stop();		 
+			}
+		}
+		else if(g_ctrl_mode == CTRLMODE_LINE_TRACKING) {
+			int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+			int next_state = g_next_event_table[event][g_cur_state];
+			if(next_state != g_cur_state) {
+				if(next_state == STATE_TURN_LEFT) {
+					left();
+				}
+				else if(next_state == STATE_GO_FORWARD) {
+					forward();
+				}
+				else if(next_state == STATE_TURN_RIGHT) {
+					right();
+				}
+				else if(next_state == STATE_STOP) {
+					stop();
+					delay(1000);
+				}
+			}
+		}
+		else if(g_ctrl_mode == CTRLMODE_AUTO_DRIVE) {
+			int right_distance = 0, left_distance = 0, middle_distance = 0;
+
+			if(getstr=='s') {
 				g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
-				wait_tick = portMAX_DELAY;
-				_stop();
-			}
-			else if(getstr == 't') {
-				Serial.println("Trace!");
+				_stop();		 
+			}		
+			else {
+				middle_distance = _us_get_distance();
 
-				g_ctrl_mode = CTRLMODE_LINE_TRACKING;
-				wait_tick = 10/portTICK_RATE_MS; // 10[ms]
-				Serial.print("Trace!");
-				Serial.println(wait_tick);
-				stop();		 
-			}
+				if(middle_distance <= g_stop_distance) {     
+					_stop();
+					vTaskDelay(500); 	  
+					SERVO_set_angle(-80);  
+					vTaskDelay(1000);      
+					right_distance = _us_get_distance();
 
-			//----- RoboCarêßå‰ -----
-			if(g_ctrl_mode == CTRLMODE_MANUAL_DRIVE) {
-				if(getstr=='f') {
-					_move_forward(g_motor_speed);
-				}
-				else if(getstr=='b') {
-					_move_backward(g_motor_speed);
-				}
-				else if(getstr=='l') {
-					_rotate_ccw(g_motor_speed);
-				}
-				else if(getstr=='r') {
-					_rotate_cw(g_motor_speed);
-				}
-				else if(getstr=='L') {
-					_turn_left(MOTOR_DIR_FWD, g_motor_speed_on_left_turn, g_lr_level_on_left_turn);
-				}
-				else if(getstr=='R') {
-					_turn_right(MOTOR_DIR_FWD, g_motor_speed_on_right_turn, g_lr_level_on_right_turn); // î˜í≤êÆ
-				}
-				else if(getstr=='C') {
-					_turn_left(MOTOR_DIR_REV, g_motor_speed_on_left_turn, g_lr_level_on_left_turn);
-				}
-				else if(getstr=='D') {
-					_turn_right(MOTOR_DIR_REV, g_motor_speed_on_right_turn, g_lr_level_on_right_turn);
-				}
-				else if(getstr=='s') {
-					_stop();		 
-				}
-			}
-			else if(g_ctrl_mode == CTRLMODE_LINE_TRACKING) {
-				int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
-				int next_state = g_next_event_table[event][g_cur_state];
-				if(next_state != g_cur_state) {
-					if(next_state == STATE_TURN_LEFT) {
-						left();
+					vTaskDelay(500);
+					SERVO_set_angle(0);              
+					vTaskDelay(1000);                                                  
+					SERVO_set_angle(80);              
+					vTaskDelay(1000); 
+					left_distance = _us_get_distance();
+
+					vTaskDelay(500);
+					SERVO_set_angle(0);              
+					vTaskDelay(1000);
+					if((right_distance<=g_stop_distance) && (left_distance<=g_stop_distance)) {
+						_move_backward(g_motor_speed);
+						vTaskDelay(180);
 					}
-					else if(next_state == STATE_GO_FORWARD) {
-						forward();
-					}
-					else if(next_state == STATE_TURN_RIGHT) {
-						right();
-					}
-					else if(next_state == STATE_STOP) {
-						stop();
-						delay(1000);
-					}
-				}
-			}
-			else if(g_ctrl_mode == CTRLMODE_AUTO_DRIVE) {
-				int right_distance = 0, left_distance = 0, middle_distance = 0;
-
-				if(getstr=='s') {
-					g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
-					_stop();		 
-				}		
-				else {
-					middle_distance = _us_get_distance();
-
-					if(middle_distance <= g_stop_distance) {     
-						_stop();
-						vTaskDelay(500); 	  
-						SERVO_set_angle(-80);  
-						vTaskDelay(1000);      
-						right_distance = _us_get_distance();
-
+					else if((right_distance>9000) && (left_distance>9000)) {
+						_rotate_cw(180); // CW/CCWÇÃÇ«ÇøÇÁÇ≈Ç‡ÇÊÇ¢
 						vTaskDelay(500);
-						SERVO_set_angle(0);              
-						vTaskDelay(1000);                                                  
-						SERVO_set_angle(80);              
-						vTaskDelay(1000); 
-						left_distance = _us_get_distance();
-
+					}
+					else if(right_distance>left_distance) {
+						_rotate_cw(180);
 						vTaskDelay(500);
-						SERVO_set_angle(0);              
-						vTaskDelay(1000);
-						if((right_distance<=g_stop_distance) && (left_distance<=g_stop_distance)) {
-							_move_backward(g_motor_speed);
-							vTaskDelay(180);
-						}
-						else if((right_distance>9000) && (left_distance>9000)) {
-							_rotate_cw(180); // CW/CCWÇÃÇ«ÇøÇÁÇ≈Ç‡ÇÊÇ¢
-							vTaskDelay(500);
-						}
-						else if(right_distance>left_distance) {
-							_rotate_cw(180);
-							vTaskDelay(500);
-						}
-						else if(right_distance<left_distance) {
-							_rotate_ccw(150);
-							vTaskDelay(500);
-						}
-						else {
-							_move_forward(g_motor_speed);
-						}
-					}  
+					}
+					else if(right_distance<left_distance) {
+						_rotate_ccw(150);
+						vTaskDelay(500);
+					}
 					else {
 						_move_forward(g_motor_speed);
 					}
+				}  
+				else {
+					_move_forward(g_motor_speed);
 				}
 			}
 		}
-/*
-		else {
-			Serial.println("[Error] Queue");
-			if(uxQueueMessagesWaiting(g_xQueue_Serial) != 0) {
-				while(1) {
-					Serial.println("rtos queue receive error, stopped");
-					vTaskDelay(1000);
-				}
-			}
-		}
-*/
 	}
 	
 }
