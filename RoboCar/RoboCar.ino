@@ -78,6 +78,12 @@
 #define	MOTOR_SPEED_MIN				(40)
 #define	MOTOR_SPEED_MAX				(255)
 
+// 信号機関連
+#define	SIGNAL_COLOR_BLACK			(0)
+#define	SIGNAL_COLOR_GREEN			(1)
+#define	SIGNAL_COLOR_YELLOW			(2)
+#define	SIGNAL_COLOR_RED			(3)
+
 typedef struct {
 	int		event;
 	int		param1;
@@ -102,6 +108,8 @@ int g_lr_level_on_right_turn = 110;
 int g_motor_speed_right;
 int g_motor_speed_left;
 int	g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+
+int	g_trafic_signal_color = RED;
 
 int g_stop_distance = 20;	// [cm]
 
@@ -139,6 +147,51 @@ const char* mqttTopic_Query = "KM/Query";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+
+
+#define LT_R (!digitalRead(IO_PIN_LINETRACK_RIGHT))
+#define LT_M (!digitalRead(IO_PIN_LINETRACK_CENTER))
+#define LT_L (!digitalRead(IO_PIN_LINETRACK_LEFT))
+enum {
+	TRACK_EVENT_XXX	= 0,
+	TRACK_EVENT_XXO,
+	TRACK_EVENT_XOX,
+	TRACK_EVENT_XOO,
+	TRACK_EVENT_OXX,
+	TRACK_EVENT_OXO,
+	TRACK_EVENT_OOX,
+	TRACK_EVENT_OOO,
+
+	TRACK_EVENT_NUM
+};
+
+enum {
+	STATE_TURN_LEFT = 0,	
+	STATE_GO_FORWARD,	
+	STATE_TURN_RIGHT,	
+	STATE_STOP,	
+
+	STATE_NUM	
+};
+int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
+{
+//				Left				Center				Right				Stop
+/*XXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
+/*XXO*/		STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+/*XOX*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+/*XOO*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
+/*OXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
+/*OXO*/		STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+/*OOX*/		STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+/*OOO*/		STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
+};
+
+int	g_cur_state = STATE_GO_FORWARD;
+#define carSpeed 150
+
+
+
+
 /* 
  *  Subscribe している Topic にメッセージが来た時に処理させる Callback 関数を設定。
  *  ここでは単にメッセージを取り出しているだけ。
@@ -157,10 +210,13 @@ void callback_MQTT(char* topic, byte* payload, unsigned int length)
 		const char* led = object["LED"];
 		if(led != NULL) {
 			if(strcmp(led, "GREEN") == 0) {
-				digitalWrite(IO_PIN_LED2, HIGH);
+				g_trafic_signal_color = SIGNAL_COLOR_GREEN;
+			}
+			else if(strcmp(led, "YELLOW") == 0) {
+				g_trafic_signal_color = SIGNAL_COLOR_YELLOW;
 			}
 			else if(strcmp(led, "RED") == 0) {
-				digitalWrite(IO_PIN_LED2, LOW);
+				g_trafic_signal_color = SIGNAL_COLOR_RED;
 			}
 		}
 	}
@@ -333,6 +389,7 @@ void _move_forward(int speed)
 	MOTOR_set_speed_left(MOTOR_DIR_FWD, speed);
 	
 	g_state_motor = STATE_MOTOR_MOVING_FORWARD;
+	g_cur_state = STATE_GO_FORWARD;
 	
 	LOG_output("go forward", 1);
 }
@@ -390,6 +447,7 @@ void _rotate_ccw(int speed)
 	MOTOR_set_speed_left(MOTOR_DIR_REV, speed);
 	
 	g_state_motor = STATE_MOTOR_ROTATING_CCW;
+	g_cur_state = STATE_TURN_LEFT;
 	
 	LOG_output("rotate ccw!", 1);
 }
@@ -400,6 +458,7 @@ void _rotate_cw(int speed)
 	MOTOR_set_speed_left(MOTOR_DIR_FWD, speed);
 	
 	g_state_motor = STATE_MOTOR_ROTATING_CW;
+	g_cur_state = STATE_TURN_RIGHT;
 	
 	LOG_output("rotate cw!", 1);
 }
@@ -410,6 +469,7 @@ void _stop()
 	MOTOR_set_speed_right(0, 0);
 
 	g_state_motor = STATE_MOTOR_STOP;
+	g_cur_state = STATE_STOP;
 
 	LOG_output("Stop!", 1);
 }
@@ -543,96 +603,6 @@ void _Task_disp(void* param)
 	
 }
 
-#define LT_R (!digitalRead(IO_PIN_LINETRACK_RIGHT))
-#define LT_M (!digitalRead(IO_PIN_LINETRACK_CENTER))
-#define LT_L (!digitalRead(IO_PIN_LINETRACK_LEFT))
-enum {
-	TRACK_EVENT_XXX	= 0,
-	TRACK_EVENT_XXO,
-	TRACK_EVENT_XOX,
-	TRACK_EVENT_XOO,
-	TRACK_EVENT_OXX,
-	TRACK_EVENT_OXO,
-	TRACK_EVENT_OOX,
-	TRACK_EVENT_OOO,
-
-	TRACK_EVENT_NUM
-};
-
-enum {
-	STATE_TURN_LEFT = 0,	
-	STATE_GO_FORWARD,	
-	STATE_TURN_RIGHT,	
-	STATE_STOP,	
-
-	STATE_NUM	
-};
-int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
-{
-//				Left				Center				Right				Stop
-/*XXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
-/*XXO*/		STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-/*XOX*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-/*XOO*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
-/*OXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
-/*OXO*/		STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-/*OOX*/		STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-/*OOO*/		STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
-};
-
-int	g_cur_state = STATE_GO_FORWARD;
-#define carSpeed 150
-
-void forward()
-{
-	ledcWrite(DAC_CH_MOTOR_A, carSpeed);  
-	ledcWrite(DAC_CH_MOTOR_B, carSpeed);  
-	digitalWrite(IO_PIN_MOTOR_1, HIGH);
-	digitalWrite(IO_PIN_MOTOR_2, LOW);
-	digitalWrite(IO_PIN_MOTOR_3, LOW);
-	digitalWrite(IO_PIN_MOTOR_4, HIGH);
-	g_cur_state = STATE_GO_FORWARD;
-
-	Serial.println("go forward!");
-}
-
-void left()
-{
-	ledcWrite(DAC_CH_MOTOR_A, carSpeed);  
-	ledcWrite(DAC_CH_MOTOR_B, carSpeed);  
-	digitalWrite(IO_PIN_MOTOR_1, LOW);
-	digitalWrite(IO_PIN_MOTOR_2, HIGH);
-	digitalWrite(IO_PIN_MOTOR_3, LOW);
-	digitalWrite(IO_PIN_MOTOR_4, HIGH);
-	g_cur_state = STATE_TURN_LEFT;
-
-	Serial.println("go left!");
-}
-
-void right()
-{
-	ledcWrite(DAC_CH_MOTOR_A, carSpeed);  
-	ledcWrite(DAC_CH_MOTOR_B, carSpeed);  
-	digitalWrite(IO_PIN_MOTOR_1, HIGH);
-	digitalWrite(IO_PIN_MOTOR_2, LOW);
-	digitalWrite(IO_PIN_MOTOR_3, HIGH);
-	digitalWrite(IO_PIN_MOTOR_4, LOW); 
-	g_cur_state = STATE_TURN_RIGHT;
-
-	Serial.println("go right!");
-} 
-
-void stop()
-{
-	ledcWrite(DAC_CH_MOTOR_A, 0);  
-	ledcWrite(DAC_CH_MOTOR_B, 0);  
-	digitalWrite(IO_PIN_MOTOR_ENA, LOW);
-	digitalWrite(IO_PIN_MOTOR_ENB, LOW);
-	g_cur_state = STATE_STOP;
-
-	Serial.println("Stop!");
-} 
-
 void _Task_robo_car(void* param)
 {
 	portTickType 	wait_tick = portMAX_DELAY;
@@ -642,27 +612,26 @@ void _Task_robo_car(void* param)
 		BaseType_t	xStatus = xQueueReceive(g_xQueue_Serial, &getstr, wait_tick);
 		//----- Mode切り替え -----
 		if(getstr == 'a') {
+			LOG_output("Auto Drive Mode", 5);
 			g_ctrl_mode = CTRLMODE_AUTO_DRIVE;
 			wait_tick = portMAX_DELAY;
 			_stop();
 		}
 		else if(getstr == 'm') {
+			LOG_output("manual Drive Mode", 5);
 			g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
 			wait_tick = portMAX_DELAY;
 			_stop();
 		}
 		else if(getstr == 't') {
-			Serial.println("Trace!");
-
+			LOG_output("Line Trace Mode", 5);
 			g_ctrl_mode = CTRLMODE_LINE_TRACKING;
 			wait_tick = 10/portTICK_RATE_MS; // 10[ms]
-			Serial.print("Trace!");
-			Serial.println(wait_tick);
-			stop();		 
+			_stop();		 
 		}
 
 		//----- RoboCar制御 -----
-		if(g_ctrl_mode == CTRLMODE_MANUAL_DRIVE) {
+		if(g_ctrl_mode == CTRLMODE_MANUAL_DRIVE) { // ----- Manual Drive Mode
 			if(getstr=='f') {
 				_move_forward(g_motor_speed);
 			}
@@ -691,26 +660,26 @@ void _Task_robo_car(void* param)
 				_stop();		 
 			}
 		}
-		else if(g_ctrl_mode == CTRLMODE_LINE_TRACKING) {
+		else if(g_ctrl_mode == CTRLMODE_LINE_TRACKING) {  // ----- Line Trace Mode
 			int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
 			int next_state = g_next_event_table[event][g_cur_state];
 			if(next_state != g_cur_state) {
 				if(next_state == STATE_TURN_LEFT) {
-					left();
+					_rotate_ccw(carSpeed);
 				}
 				else if(next_state == STATE_GO_FORWARD) {
-					forward();
+					_move_forward(carSpeed);
 				}
 				else if(next_state == STATE_TURN_RIGHT) {
-					right();
+					_rotate_cw(carSpeed);
 				}
 				else if(next_state == STATE_STOP) {
-					stop();
+					_stop();
 					delay(1000);
 				}
 			}
 		}
-		else if(g_ctrl_mode == CTRLMODE_AUTO_DRIVE) {
+		else if(g_ctrl_mode == CTRLMODE_AUTO_DRIVE) { // ----- Manual Drive Mode
 			int right_distance = 0, left_distance = 0, middle_distance = 0;
 
 			if(getstr=='s') {
