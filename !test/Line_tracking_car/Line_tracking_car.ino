@@ -168,19 +168,9 @@ int create_event()
 
 void loop() 
 {
-/*
-	Serial.print("");
-	Serial.print(LT_L);
-	Serial.print("");
-	Serial.print(LT_M);
-	Serial.print("");
-	Serial.print(LT_R);
-	Serial.println();
-	delay(500);	
-*/
-	delay(10);	
-	int event = create_event();
-//	int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+//	delay(10);	
+//	int event = create_event();
+	int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
 	int next_state = g_next_event_table[event][g_cur_state];
 	
 	if(next_state != g_cur_state) {
