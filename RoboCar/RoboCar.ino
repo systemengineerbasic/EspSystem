@@ -112,11 +112,13 @@ SemaphoreHandle_t g_xMutex = NULL;
 
 #if 1
 // Wifi アクセスポイントの情報
-const char* ssid = "SPWH_H32_F37CDD"; // WiFiルータ1
+//const char* ssid = "SPWH_H32_F37CDD"; // WiFiルータ1
 //const char* ssid = "SPWH_H32_5AE424"; // WiFiルータ2
-const char* password = "********";
+//const char* password = "********";
 //const char* password = "19iyteirq5291f2"; // WiFiルータ1
 //const char* password = "jaffmffm04mf01i"; // WiFiルータ2
+const char* ssid = "HUMAX-C4130";
+const char* password = "LGNWLTNmMTdFX";
 
 // 自分で設定した CloudMQTT.xom サイトの Instance info から取得
 const char* mqttServer = "m16.cloudmqtt.com";
@@ -541,23 +543,128 @@ void _Task_disp(void* param)
 	
 }
 
+#define LT_R (!digitalRead(IO_PIN_LINETRACK_RIGHT))
+#define LT_M (!digitalRead(IO_PIN_LINETRACK_CENTER))
+#define LT_L (!digitalRead(IO_PIN_LINETRACK_LEFT))
+enum {
+	TRACK_EVENT_XXX	= 0,
+	TRACK_EVENT_XXO,
+	TRACK_EVENT_XOX,
+	TRACK_EVENT_XOO,
+	TRACK_EVENT_OXX,
+	TRACK_EVENT_OXO,
+	TRACK_EVENT_OOX,
+	TRACK_EVENT_OOO,
+
+	TRACK_EVENT_NUM
+};
+
+enum {
+	STATE_TURN_LEFT = 0,	
+	STATE_GO_FORWARD,	
+	STATE_TURN_RIGHT,	
+	STATE_STOP,	
+
+	STATE_NUM	
+};
+int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
+{
+//				Left				Center				Right				Stop
+/*XXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
+/*XXO*/		STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+/*XOX*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+/*XOO*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
+/*OXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
+/*OXO*/		STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+/*OOX*/		STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+/*OOO*/		STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
+};
+
+int	g_cur_state = STATE_GO_FORWARD;
+#define carSpeed 150
+
+void forward()
+{
+	ledcWrite(DAC_CH_MOTOR_A, carSpeed);  
+	ledcWrite(DAC_CH_MOTOR_B, carSpeed);  
+	digitalWrite(IO_PIN_MOTOR_1, HIGH);
+	digitalWrite(IO_PIN_MOTOR_2, LOW);
+	digitalWrite(IO_PIN_MOTOR_3, LOW);
+	digitalWrite(IO_PIN_MOTOR_4, HIGH);
+	g_cur_state = STATE_GO_FORWARD;
+
+	Serial.println("go forward!");
+}
+
+void left()
+{
+	ledcWrite(DAC_CH_MOTOR_A, carSpeed);  
+	ledcWrite(DAC_CH_MOTOR_B, carSpeed);  
+	digitalWrite(IO_PIN_MOTOR_1, LOW);
+	digitalWrite(IO_PIN_MOTOR_2, HIGH);
+	digitalWrite(IO_PIN_MOTOR_3, LOW);
+	digitalWrite(IO_PIN_MOTOR_4, HIGH);
+	g_cur_state = STATE_TURN_LEFT;
+
+	Serial.println("go left!");
+}
+
+void right()
+{
+	ledcWrite(DAC_CH_MOTOR_A, carSpeed);  
+	ledcWrite(DAC_CH_MOTOR_B, carSpeed);  
+	digitalWrite(IO_PIN_MOTOR_1, HIGH);
+	digitalWrite(IO_PIN_MOTOR_2, LOW);
+	digitalWrite(IO_PIN_MOTOR_3, HIGH);
+	digitalWrite(IO_PIN_MOTOR_4, LOW); 
+	g_cur_state = STATE_TURN_RIGHT;
+
+	Serial.println("go right!");
+} 
+
+void stop()
+{
+	ledcWrite(DAC_CH_MOTOR_A, 0);  
+	ledcWrite(DAC_CH_MOTOR_B, 0);  
+	digitalWrite(IO_PIN_MOTOR_ENA, LOW);
+	digitalWrite(IO_PIN_MOTOR_ENB, LOW);
+	g_cur_state = STATE_STOP;
+
+	Serial.println("Stop!");
+} 
+
 void _Task_robo_car(void* param)
 {
 	BaseType_t xStatus;
+	portTickType 	wait_tick = portMAX_DELAY;
 
 	for(;;) {
 		int getstr = 0;
-		xStatus = xQueueReceive(g_xQueue_Serial, &getstr, portMAX_DELAY);
-		if(xStatus == pdPASS) {
+		xStatus = xQueueReceive(g_xQueue_Serial, &getstr, wait_tick);
+		if(1) {
+//		if(xStatus == pdPASS) {
+			//----- Mode切り替え -----
 			if(getstr == 'a') {
 				g_ctrl_mode = CTRLMODE_AUTO_DRIVE;
+				wait_tick = portMAX_DELAY;
 				_stop();
 			}
 			else if(getstr == 'm') {
 				g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+				wait_tick = portMAX_DELAY;
 				_stop();
 			}
+			else if(getstr == 't') {
+				Serial.println("Trace!");
 
+				g_ctrl_mode = CTRLMODE_LINE_TRACKING;
+				wait_tick = 10/portTICK_RATE_MS; // 10[ms]
+				Serial.print("Trace!");
+				Serial.println(wait_tick);
+				stop();		 
+			}
+
+			//----- RoboCar制御 -----
 			if(g_ctrl_mode == CTRLMODE_MANUAL_DRIVE) {
 				if(getstr=='f') {
 					_move_forward(g_motor_speed);
@@ -585,6 +692,25 @@ void _Task_robo_car(void* param)
 				}
 				else if(getstr=='s') {
 					_stop();		 
+				}
+			}
+			else if(g_ctrl_mode == CTRLMODE_LINE_TRACKING) {
+				int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+				int next_state = g_next_event_table[event][g_cur_state];
+				if(next_state != g_cur_state) {
+					if(next_state == STATE_TURN_LEFT) {
+						left();
+					}
+					else if(next_state == STATE_GO_FORWARD) {
+						forward();
+					}
+					else if(next_state == STATE_TURN_RIGHT) {
+						right();
+					}
+					else if(next_state == STATE_STOP) {
+						stop();
+						delay(1000);
+					}
 				}
 			}
 			else if(g_ctrl_mode == CTRLMODE_AUTO_DRIVE) {
@@ -640,6 +766,7 @@ void _Task_robo_car(void* param)
 				}
 			}
 		}
+/*
 		else {
 			Serial.println("[Error] Queue");
 			if(uxQueueMessagesWaiting(g_xQueue_Serial) != 0) {
@@ -649,6 +776,7 @@ void _Task_robo_car(void* param)
 				}
 			}
 		}
+*/
 	}
 	
 }
