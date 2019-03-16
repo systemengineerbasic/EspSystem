@@ -82,18 +82,9 @@ void forward()
 	digitalWrite(IN2, LOW);
 	digitalWrite(IN3, LOW);
 	digitalWrite(IN4, HIGH);
-	Serial.println("go forward!");
-}
+	g_cur_state = STATE_GO_FORWARD;
 
-void back()
-{
-	ledcWrite(0, carSpeed);  
-	ledcWrite(1, carSpeed);  
-	digitalWrite(IN1, LOW);
-	digitalWrite(IN2, HIGH);
-	digitalWrite(IN3, HIGH);
-	digitalWrite(IN4, LOW);
-	Serial.println("go back!");
+	Serial.println("go forward!");
 }
 
 void left()
@@ -104,6 +95,8 @@ void left()
 	digitalWrite(IN2, HIGH);
 	digitalWrite(IN3, LOW);
 	digitalWrite(IN4, HIGH);
+	g_cur_state = STATE_TURN_LEFT;
+
 	Serial.println("go left!");
 }
 
@@ -115,6 +108,8 @@ void right()
 	digitalWrite(IN2, LOW);
 	digitalWrite(IN3, HIGH);
 	digitalWrite(IN4, LOW); 
+	g_cur_state = STATE_TURN_RIGHT;
+
 	Serial.println("go right!");
 } 
 
@@ -124,6 +119,8 @@ void stop()
 	ledcWrite(1, 0);  
 	digitalWrite(ENA, LOW);
 	digitalWrite(ENB, LOW);
+	g_cur_state = STATE_STOP;
+
 	Serial.println("Stop!");
 } 
 
@@ -169,7 +166,6 @@ void setup()
 	ledcAttachPin(ENB, 1);
 
 	forward();
-	g_cur_state = STATE_GO_FORWARD;
 
 	digitalWrite(IO_PIN_LED,HIGH);
 }
@@ -194,6 +190,7 @@ void loop()
 		}
 	}
 	time1 = time2;
+
 	if(next_state != g_cur_state) {
 		Serial.println(next_state);
 		if(next_state == STATE_TURN_LEFT) {
@@ -209,8 +206,6 @@ void loop()
 			stop();
 			delay(1000);
 		}
-		
-		g_cur_state = next_state;
 	}
 	
 	is_first = 0;
