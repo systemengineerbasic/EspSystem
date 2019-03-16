@@ -56,15 +56,23 @@ enum {
 
 int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
-	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
-	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
-	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
-	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-	STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
+//				Left				Center				Right				Stop
+/*XXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
+/*XXO*/		STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+/*XOX*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+/*XOO*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
+/*OXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
+/*OXO*/		STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
+/*OOX*/		STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
+/*OOO*/		STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
 };
+
+int	g_cur_state = STATE_GO_FORWARD;
+unsigned long time1 = 0;
+unsigned long time_acum = 0;
+unsigned long time_count = 0;
+int	is_first = 1;
+
 
 void forward()
 {
@@ -119,7 +127,28 @@ void stop()
 	Serial.println("Stop!");
 } 
 
-int	g_cur_state = STATE_GO_FORWARD;
+int create_event()
+{
+	// ƒ`ƒƒƒ^ƒŠƒ“ƒO–hŽ~
+	int count = 0;
+	int pre_event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+	for(int i = 0; i < 500; i ++) {
+		int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+		if(event == pre_event) {
+			count ++;
+		}
+		else {
+			count = 0;
+		}
+		pre_event = event;
+		if(count > 50) {
+			break;
+		}
+	}
+	
+	return	pre_event;
+}
+
 void setup()
 {
 	Serial.begin(9600);
@@ -145,34 +174,26 @@ void setup()
 	digitalWrite(IO_PIN_LED,HIGH);
 }
 
-int create_event()
-{
-	int count = 0;
-	int pre_event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
-	for(int i = 0; i < 500; i ++) {
-		int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
-		if(event == pre_event) {
-			count ++;
-		}
-		else {
-			count = 0;
-		}
-		pre_event = event;
-		if(count > 50) {
-			break;
-		}
-	}
-	
-	return	pre_event;
-}
-
 void loop() 
 {
-//	delay(10);	
+	delay(10);	
 //	int event = create_event();
 	int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
 	int next_state = g_next_event_table[event][g_cur_state];
-	
+
+	unsigned long time2 = micros();
+	if(is_first != 1) {
+		unsigned long diff_time = time2 - time1;
+		time_acum += diff_time;
+		time_count ++;
+		if(time_count == 10000) {
+			Serial.print("time = ");
+			Serial.println(time_acum);
+			time_acum = 0;
+			time_count = 0;
+		}
+	}
+	time1 = time2;
 	if(next_state != g_cur_state) {
 		Serial.println(next_state);
 		if(next_state == STATE_TURN_LEFT) {
@@ -191,5 +212,7 @@ void loop()
 		
 		g_cur_state = next_state;
 	}
+	
+	is_first = 0;
 }
 
