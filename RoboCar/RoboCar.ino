@@ -93,6 +93,7 @@ typedef struct {
 
 RPR0521RS rpr0521rs;
 
+int8_t	g_is_signal_recieved = 0;
 int		g_log_level = 3; // 表示するlogのレベル(0～99)
 float g_proficiency_score = 0.0;	// 熟練度
 QueueHandle_t g_xQueue_Serial;
@@ -109,7 +110,7 @@ int g_motor_speed_right;
 int g_motor_speed_left;
 int	g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
 
-int	g_trafic_signal_color = RED;
+int	g_trafic_signal_color = SIGNAL_COLOR_RED;
 
 int g_stop_distance = 20;	// [cm]
 
@@ -160,7 +161,9 @@ enum {
 	TRACK_EVENT_OXX,
 	TRACK_EVENT_OXO,
 	TRACK_EVENT_OOX,
-	TRACK_EVENT_OOO,
+	TRACK_EVENT_OOO_RED,
+	TRACK_EVENT_OOO_YELLOW,
+	TRACK_EVENT_OOO_GREEN,
 
 	TRACK_EVENT_NUM
 };
@@ -169,21 +172,24 @@ enum {
 	STATE_TURN_LEFT = 0,	
 	STATE_GO_FORWARD,	
 	STATE_TURN_RIGHT,	
-	STATE_STOP,	
+	STATE_WAIT,	
 
 	STATE_NUM	
 };
 int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
-//				Left				Center				Right				Stop
-/*XXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_STOP,
-/*XXO*/		STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-/*XOX*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-/*XOO*/		STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
-/*OXX*/		STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,
-/*OXO*/		STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,
-/*OOX*/		STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,
-/*OOO*/		STATE_STOP,			STATE_STOP,			STATE_STOP,			STATE_STOP,
+//				Left				Center				Right				Wait
+/*XXX*/			STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_WAIT,
+/*XXO*/			STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_WAIT,
+/*XOX*/			STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_WAIT,
+/*XOO*/			STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_WAIT,
+/*OXX*/			STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_TURN_LEFT,	STATE_WAIT,
+/*OXO*/			STATE_TURN_LEFT,	STATE_TURN_RIGHT,	STATE_TURN_RIGHT,	STATE_WAIT,
+/*OOX*/			STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_WAIT,
+/*OOO(RED)*/	STATE_WAIT,			STATE_WAIT,			STATE_WAIT,			STATE_WAIT,
+
+/*OOO(YELLOW)*/	STATE_WAIT,			STATE_WAIT,			STATE_WAIT,			STATE_WAIT,
+/*OOO(GREEN)*/	STATE_TURN_LEFT,	STATE_GO_FORWARD,	STATE_TURN_RIGHT,	STATE_GO_FORWARD,
 };
 
 int	g_cur_state = STATE_GO_FORWARD;
@@ -209,6 +215,7 @@ void callback_MQTT(char* topic, byte* payload, unsigned int length)
 	if(strcmp(topic, mqttTopic_Signal) == 0) {
 		const char* led = object["LED"];
 		if(led != NULL) {
+			g_is_signal_recieved = 1; // 信号情報受信済み
 			if(strcmp(led, "GREEN") == 0) {
 				g_trafic_signal_color = SIGNAL_COLOR_GREEN;
 			}
@@ -218,6 +225,8 @@ void callback_MQTT(char* topic, byte* payload, unsigned int length)
 			else if(strcmp(led, "RED") == 0) {
 				g_trafic_signal_color = SIGNAL_COLOR_RED;
 			}
+			Serial.print("LED:");
+			Serial.println(g_trafic_signal_color);
 		}
 	}
 
@@ -289,6 +298,18 @@ void MQTT_reconnect() {
     }
   }
 }
+
+void MQTT_publish_query(const char* id)
+{
+	// JSONフォーマット作成
+	StaticJsonDocument<64> doc;
+	doc["Id"] = id;
+	char payload[64];
+	serializeJson(doc, payload);
+	// MQTT brokerへpublish
+	client.publish(mqttTopic_Query, payload);
+}
+
 #endif
 
 void LOG_output(const char str[], int level=99)
@@ -469,7 +490,7 @@ void _stop()
 	MOTOR_set_speed_right(0, 0);
 
 	g_state_motor = STATE_MOTOR_STOP;
-	g_cur_state = STATE_STOP;
+	g_cur_state = STATE_WAIT;
 
 	LOG_output("Stop!", 1);
 }
@@ -595,12 +616,40 @@ void _Task_disp(void* param)
 		doc_in["Bright"] = als_val;
 		doc_in["Prox"] = ps_val;
 		doc_in["P-Score"] = g_proficiency_score;
-		// payloadにセットされたJSON形式メッセージをpublish
+		// payloadにセットさ_れたJSON形式メッセージをpublish
 		char payload[200];
 		serializeJson(doc_in, payload);
 		client.publish(mqttTopic_Sensor, payload);
+		
+		if(g_is_signal_recieved == 0) {
+			// 信号機情報を一度も受信していない場合は要求する
+			MQTT_publish_query("Signal");
+		}
 	}
 	
+}
+
+int _create_event()
+{
+	int event;
+	int sensor = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
+	
+	if(sensor == 0x7) {
+		if(g_trafic_signal_color == SIGNAL_COLOR_RED) {
+			event = TRACK_EVENT_OOO_RED;
+		}
+		else if(g_trafic_signal_color == SIGNAL_COLOR_YELLOW) {
+			event = TRACK_EVENT_OOO_YELLOW;
+		}
+		else {
+			event = TRACK_EVENT_OOO_GREEN;
+		}
+	}
+	else {
+		event = sensor;
+	}
+	
+	return	event;
 }
 
 void _Task_robo_car(void* param)
@@ -627,7 +676,7 @@ void _Task_robo_car(void* param)
 			LOG_output("Line Trace Mode", 5);
 			g_ctrl_mode = CTRLMODE_LINE_TRACKING;
 			wait_tick = 10/portTICK_RATE_MS; // 10[ms]
-			_stop();		 
+			_move_forward(carSpeed);
 		}
 
 		//----- RoboCar制御 -----
@@ -661,21 +710,30 @@ void _Task_robo_car(void* param)
 			}
 		}
 		else if(g_ctrl_mode == CTRLMODE_LINE_TRACKING) {  // ----- Line Trace Mode
-			int event = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
-			int next_state = g_next_event_table[event][g_cur_state];
-			if(next_state != g_cur_state) {
-				if(next_state == STATE_TURN_LEFT) {
-					_rotate_ccw(carSpeed);
-				}
-				else if(next_state == STATE_GO_FORWARD) {
-					_move_forward(carSpeed);
-				}
-				else if(next_state == STATE_TURN_RIGHT) {
-					_rotate_cw(carSpeed);
-				}
-				else if(next_state == STATE_STOP) {
-					_stop();
-					delay(1000);
+			if(getstr=='s') {
+				g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
+				_stop();		 
+			}		
+			else {
+				int event = _create_event();
+				int next_state = g_next_event_table[event][g_cur_state];
+				if(next_state != g_cur_state) {
+					if(next_state == STATE_TURN_LEFT) {
+						Serial.println("STATE_TURN_LEFT");
+						_rotate_ccw(carSpeed);
+					}
+					else if(next_state == STATE_GO_FORWARD) {
+						Serial.println("STATE_GO_FORWARD");
+						_move_forward(carSpeed);
+					}
+					else if(next_state == STATE_TURN_RIGHT) {
+						Serial.println("STATE_TURN_RIGHT");
+						_rotate_cw(carSpeed);
+					}
+					else if(next_state == STATE_WAIT) {
+						Serial.println("STATE_WAIT");
+						_stop();
+					}
 				}
 			}
 		}
