@@ -555,7 +555,7 @@ void osTask_sensor(void* param)
 		}
 		else {
 			digitalWrite(IO_PIN_LED,HIGH);
-			if(diff_axl > 1.5) { // ÕŒ‚‚ª‘å‚«‚©‚Á‚½‚Ístop‚³‚¹‚é
+			if(diff_axl > 2.0) { // ÕŒ‚‚ª‘å‚«‚©‚Á‚½‚Ístop‚³‚¹‚é
 				int getstr = 's';
 				xQueueSend(g_xQueue_Serial, &getstr, 100);
 			}
