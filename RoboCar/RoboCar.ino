@@ -155,6 +155,7 @@ PubSubClient g_mqtt_client(espClient);
 #define LT_M (!digitalRead(IO_PIN_LINETRACK_CENTER))
 #define LT_L (!digitalRead(IO_PIN_LINETRACK_LEFT))
 enum {
+	TRACK_EVENT_NONE = -1,
 	TRACK_EVENT_XXX	= 0,
 	TRACK_EVENT_XXO,
 	TRACK_EVENT_XOX,
@@ -164,7 +165,7 @@ enum {
 	TRACK_EVENT_OOX,
 	TRACK_EVENT_OOO_RED,
 	TRACK_EVENT_OOO_YELLOW,
-	TRACK_EVENT_OOO_GREEN,
+	TRACK_EVENT_TURN_GREEN,
 
 	TRACK_EVENT_NUM
 };
@@ -179,7 +180,7 @@ enum {
 };
 int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
-//				Left				Center				Right				Wait
+//					Left				Forward				Right				Wait
 /*XXX*/			STATE_ROTATO_LEFT,	STATE_ROTATO_LEFT,	STATE_ROTATO_RIGHT,	STATE_WAIT,
 /*XXO*/			STATE_ROTATO_RIGHT,	STATE_ROTATO_RIGHT,	STATE_ROTATO_RIGHT,	STATE_WAIT,
 /*XOX*/			STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_WAIT,
@@ -188,9 +189,8 @@ int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
 /*OXO*/			STATE_ROTATO_LEFT,	STATE_ROTATO_RIGHT,	STATE_ROTATO_RIGHT,	STATE_WAIT,
 /*OOX*/			STATE_ROTATO_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_WAIT,
 /*OOO(RED)*/	STATE_WAIT,			STATE_WAIT,			STATE_WAIT,			STATE_WAIT,
-
 /*OOO(YELLOW)*/	STATE_WAIT,			STATE_WAIT,			STATE_WAIT,			STATE_WAIT,
-/*OOO(GREEN)*/	STATE_ROTATO_LEFT,	STATE_GO_FORWARD,	STATE_ROTATO_RIGHT,	STATE_GO_FORWARD,
+/*Turn GREEN */	STATE_ROTATO_LEFT,	STATE_GO_FORWARD,	STATE_ROTATO_RIGHT,	STATE_GO_FORWARD,
 };
 
 int	g_cur_state = STATE_GO_FORWARD;
@@ -499,25 +499,47 @@ void RoboCar_stop()
 
 int LTrace_create_event()
 {
-	int event;
+	static int is_first = 1;
+	static int pre_signal_color;
+	int event = TRACK_EVENT_NONE;
 	int sensor = ((LT_L&0x1)<<2) | ((LT_M&0x1)<<1) | ((LT_R&0x1)<<0);
 	
-	if(sensor == 0x7) {
-		if(g_trafic_signal_color == SIGNAL_COLOR_RED) {
-			event = TRACK_EVENT_OOO_RED;
-		}
-		else if(g_trafic_signal_color == SIGNAL_COLOR_YELLOW) {
-			event = TRACK_EVENT_OOO_YELLOW;
-		}
-		else {
-			event = TRACK_EVENT_OOO_GREEN;
-		}
-	}
-	else {
-		event = sensor;
+	if(is_first) {
+		pre_signal_color = g_trafic_signal_color;
+		is_first = 0;
 	}
 	
+	if((g_trafic_signal_color==SIGNAL_COLOR_GREEN) && (pre_signal_color!=SIGNAL_COLOR_GREEN)) {
+		event = TRACK_EVENT_TURN_GREEN;
+	}
+	else {
+		if(sensor == 0x7) {
+			if(g_trafic_signal_color == SIGNAL_COLOR_RED) {
+				event = TRACK_EVENT_OOO_RED;
+			}
+			else if(g_trafic_signal_color == SIGNAL_COLOR_YELLOW) {
+				event = TRACK_EVENT_OOO_YELLOW;
+			}
+		}
+		else {
+			event = sensor;
+		}
+	}
+	
+	pre_signal_color = g_trafic_signal_color;
+	
 	return	event;
+}
+
+int LTrace_get_next_state(int event)
+{
+	int next_state = g_cur_state;
+	
+	if(event != TRACK_EVENT_NONE) {
+		next_state = g_next_event_table[event][g_cur_state];
+	}
+	
+	return	next_state;
 }
 
 void osTask_sensor(void* param)
@@ -714,7 +736,7 @@ void osTask_robo_car(void* param)
 			}		
 			else {
 				int event = LTrace_create_event();
-				int next_state = g_next_event_table[event][g_cur_state];
+				int next_state = LTrace_get_next_state(event);
 				if(next_state != g_cur_state) {
 					if(next_state == STATE_ROTATO_LEFT) {
 						Serial.println("STATE_ROTATO_LEFT");
