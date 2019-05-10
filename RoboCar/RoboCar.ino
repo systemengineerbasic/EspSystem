@@ -84,7 +84,7 @@
 
 //---------------------- 信号機関連 ----------------------
 #define	SIGNAL_COLOR_BLACK			(0)
-#define	SIGNAL_COLOR_GREEN			(1)
+#define	SIGNAL_COLOR_BLUE			(1)
 #define	SIGNAL_COLOR_YELLOW			(2)
 #define	SIGNAL_COLOR_RED			(3)
 
@@ -104,7 +104,7 @@ float g_proficiency_score = 0.0;	// 熟練度
 
 
 int	g_state_motor = STATE_MOTOR_STOP;
-int g_motor_speed = 170;
+int g_motor_speed = 230;
 int g_motor_speed_on_left_turn = 230;
 int g_motor_speed_on_right_turn = 230;
 int g_lr_level_on_left_turn = 90;
@@ -127,15 +127,15 @@ float servo_coeff_b;
 //const char* password = "********";
 //const char* password = "19iyteirq5291f2"; // WiFiルータ1
 //const char* password = "jaffmffm04mf01i"; // WiFiルータ2
-const char* ssid = "HUMAX-C4130";
-const char* password = "LGNWLTNmMTdFX";
+const char* ssid = "L01_B0E5ED682BFE";
+const char* password = "d3qart6mhna8m8j";
 
 // 自分で設定した CloudMQTT.xom サイトの Instance info から取得
-const char* mqttServer = "m16.cloudmqtt.com";
-const char* mqttDeviceId = "KMCar001";
-const char* mqttUser = "vsscjrry";
-const char* mqttPassword = "kurgC_M_VZmF";
-const int mqttPort = 17555;
+const char* mqttServer = "m15.cloudmqtt.com";
+const char* mqttDeviceId = "RoboCar";
+const char* mqttUser = "niccngso";
+const char* mqttPassword = "6UKWREecCBYB";
+const int mqttPort = 13415;
 
 // Subscribe する MQTT Topic 名
 const char* mqttTopic_Signal = "KM/Signal";
@@ -165,7 +165,7 @@ enum {
 	TRACK_EVENT_OOX,
 	TRACK_EVENT_OOO_RED,
 	TRACK_EVENT_OOO_YELLOW,
-	TRACK_EVENT_TURN_GREEN,
+	TRACK_EVENT_TURN_BLUE,
 
 	TRACK_EVENT_NUM
 };
@@ -190,11 +190,10 @@ int g_next_event_table[TRACK_EVENT_NUM][STATE_NUM] =
 /*OOX*/			STATE_ROTATO_LEFT,	STATE_GO_FORWARD,	STATE_GO_FORWARD,	STATE_WAIT,
 /*OOO(RED)*/	STATE_WAIT,			STATE_WAIT,			STATE_WAIT,			STATE_WAIT,
 /*OOO(YELLOW)*/	STATE_WAIT,			STATE_WAIT,			STATE_WAIT,			STATE_WAIT,
-/*Turn GREEN */	STATE_ROTATO_LEFT,	STATE_GO_FORWARD,	STATE_ROTATO_RIGHT,	STATE_GO_FORWARD,
+/*Turn BLUE */	STATE_ROTATO_LEFT,	STATE_GO_FORWARD,	STATE_ROTATO_RIGHT,	STATE_GO_FORWARD,
 };
 
 int	g_cur_state = STATE_GO_FORWARD;
-#define carSpeed 150
 
 float	g_temperature = 0.0;
 float	g_max_diff_axl = 0.0;
@@ -221,8 +220,8 @@ void MQTT_callback(char* topic, byte* payload, unsigned int length)
 		const char* led = object["LED"];
 		if(led != NULL) {
 			g_is_signal_recieved = 1; // 信号情報受信済み
-			if(strcmp(led, "GREEN") == 0) {
-				g_trafic_signal_color = SIGNAL_COLOR_GREEN;
+			if(strcmp(led, "BLUE") == 0) {
+				g_trafic_signal_color = SIGNAL_COLOR_BLUE;
 			}
 			else if(strcmp(led, "YELLOW") == 0) {
 				g_trafic_signal_color = SIGNAL_COLOR_YELLOW;
@@ -509,8 +508,8 @@ int LTrace_create_event()
 		is_first = 0;
 	}
 	
-	if((g_trafic_signal_color==SIGNAL_COLOR_GREEN) && (pre_signal_color!=SIGNAL_COLOR_GREEN)) {
-		event = TRACK_EVENT_TURN_GREEN;
+	if((g_trafic_signal_color==SIGNAL_COLOR_BLUE) && (pre_signal_color!=SIGNAL_COLOR_BLUE)) {
+		event = TRACK_EVENT_TURN_BLUE;
 	}
 	else {
 		if(sensor == 0x7) {
@@ -578,8 +577,9 @@ void osTask_sensor(void* param)
 		else {
 			digitalWrite(IO_PIN_LED,HIGH);
 			if(diff_axl > 2.0) { // 衝撃が大きかった時はstopさせる
-				int getstr = 's';
-				xQueueSend(g_xQueue_Serial, &getstr, 100);
+				//int getstr = 's';
+				//xQueueSend(g_xQueue_Serial, &getstr, 100);
+				LOG_output("Shock detected!");
 			}
 		}
 
@@ -646,9 +646,9 @@ void osTask_disp(void* param)
 		count ++;
 		if(count > 10) {
 			count = 0;
-			Serial.print("Score = ");
-			Serial.print(g_proficiency_score, 2);
-			Serial.println();
+			char text[200];
+			sprintf(text, "Score = %f", g_proficiency_score);
+			LOG_output(text, 1);
 		}
 
 		//----- センサ値をMTQQ brokerへpublis
@@ -695,8 +695,8 @@ void osTask_robo_car(void* param)
 		else if(getstr == 't') {
 			LOG_output("Line Trace Mode", 5);
 			g_ctrl_mode = CTRLMODE_LINE_TRACKING;
-			wait_tick = 10/portTICK_RATE_MS; // 10[ms]
-			RoboCar_move_forward(carSpeed);
+			wait_tick = 5/portTICK_RATE_MS; // 5[ms]
+			RoboCar_move_forward(g_motor_speed);
 		}
 
 		//----- RoboCar制御 -----
@@ -740,15 +740,15 @@ void osTask_robo_car(void* param)
 				if(next_state != g_cur_state) {
 					if(next_state == STATE_ROTATO_LEFT) {
 						Serial.println("STATE_ROTATO_LEFT");
-						RoboCar_rotate_left(carSpeed);
+						RoboCar_rotate_left(g_motor_speed);
 					}
 					else if(next_state == STATE_GO_FORWARD) {
 						Serial.println("STATE_GO_FORWARD");
-						RoboCar_move_forward(carSpeed);
+						RoboCar_move_forward(g_motor_speed);
 					}
 					else if(next_state == STATE_ROTATO_RIGHT) {
 						Serial.println("STATE_ROTATO_RIGHT");
-						RoboCar_rotate_right(carSpeed);
+						RoboCar_rotate_right(g_motor_speed);
 					}
 					else if(next_state == STATE_WAIT) {
 						Serial.println("STATE_WAIT");
