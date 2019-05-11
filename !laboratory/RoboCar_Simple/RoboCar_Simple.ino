@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <RPR-0521RS.h>
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -7,12 +6,12 @@
 
 #include "BluetoothSerial.h"
 #include "esp_system.h"
-#include "dev_MPU6050.h"
 #include "freertos/task.h"
 
 //================================================================
 // 定数定義
 //================================================================
+#define	WIFI_ENABLE				(0)
 
 //---------------------- PIN ----------------------
 // Motor
@@ -96,8 +95,6 @@
 QueueHandle_t g_xQueue_Serial;
 SemaphoreHandle_t g_xMutex = NULL;
 
-RPR0521RS rpr0521rs;
-
 int8_t	g_is_signal_recieved = 0;
 int		g_log_level = 3; // 表示するlogのレベル(0～99)
 float g_proficiency_score = 0.0;	// 熟練度
@@ -113,7 +110,11 @@ int g_motor_speed_right;
 int g_motor_speed_left;
 int	g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
 
-int	g_trafic_signal_color = SIGNAL_COLOR_RED;
+#if WIFI_ENABLE
+	int	g_trafic_signal_color = SIGNAL_COLOR_RED;
+#else
+	int	g_trafic_signal_color = SIGNAL_COLOR_BLUE;
+#endif
 
 int g_stop_distance = 20;	// [cm]
 
@@ -544,68 +545,6 @@ int LTrace_get_next_state(int event)
 	return	next_state;
 }
 
-void osTask_sensor(void* param)
-{
-	int error;
-	float	acc_x, acc_y, acc_z;
-	float	gyro_x, gyro_y, gyro_z;
-	BaseType_t xStatus;
-	byte rc;
-	float pre_abs_axl = 0;
-
-	xSemaphoreGive(g_xMutex);
-	for(;;) {
-		vTaskDelay(50);
-
-		// 加速度、角速度、温度を取得
-		error = MPU6050_get_all(&acc_x, &acc_y, &acc_z, &gyro_x, &gyro_y, &gyro_z, &g_temperature);
-		// 衝撃検出
-		float abs_axl = (acc_x*acc_x + acc_y*acc_y + acc_z*acc_z);
-		float diff_axl = abs_axl - pre_abs_axl;
-		if(diff_axl < 0) {
-			diff_axl = -diff_axl;
-		}
-		pre_abs_axl = abs_axl;
-
-		// 照度・近接センサの値を取得
-		unsigned short ps_val;
-		float als_val;
-		rc = rpr0521rs.get_psalsval(&ps_val, &als_val);
-		if(rc == 0) {
-		}
-
-		if(diff_axl < 0.5) {
-			digitalWrite(IO_PIN_LED,LOW);
-		}
-		else {
-			digitalWrite(IO_PIN_LED,HIGH);
-			if(diff_axl > 2.0) { // 衝撃が大きかった時はstopさせる
-				//int getstr = 's';
-				//xQueueSend(g_xQueue_Serial, &getstr, 100);
-				LOG_output("Shock detected!");
-			}
-		}
-
-		if(als_val > 10.0) {
-			digitalWrite(IO_PIN_LED2,LOW);
-		}
-		else {
-			digitalWrite(IO_PIN_LED2,HIGH);
-		}
-
-		// ▼▼▼ [排他制御区間]開始 ▼▼▼
-		xStatus = xSemaphoreTake(g_xMutex, 0);
-		if(diff_axl > g_max_diff_axl) {
-			g_max_diff_axl = diff_axl;
-		}
-		g_ps_val = ps_val;
-		g_als_val = als_val;
-		xSemaphoreGive(g_xMutex);
-		// ▲▲▲ [排他制御区間]開始 ▲▲▲
-	}
-
-}
-
 void osTask_WiFi(void* param)
 {
 	for(;;) {
@@ -615,64 +554,13 @@ void osTask_WiFi(void* param)
 			MQTT_reconnect();
 		}
 		g_mqtt_client.loop();
-	}
 
-}
-
-void osTask_disp(void* param)
-{
-	BaseType_t xStatus;
-	float	temperature = 0.0;
-	float	max_diff_axl = 0.0;
-	unsigned short ps_val;
-	float als_val;
-	portTickType wakeupTime = xTaskGetTickCount();
-	int		count = 0;
-
-	xSemaphoreGive(g_xMutex);
-	for(;;) {
-		vTaskDelayUntil(&wakeupTime, 3000);
-		
-		// ▼▼▼ [排他制御区間]開始 ▼▼▼
-		xStatus = xSemaphoreTake(g_xMutex, 0);
-		temperature = g_temperature;
-		max_diff_axl = g_max_diff_axl;
-		ps_val = g_ps_val;
-		als_val = g_als_val;
-		g_max_diff_axl = 0.0; // リセット
-		xSemaphoreGive(g_xMutex);
-		// ▲▲▲ [排他制御区間]開始 ▲▲▲
-		
-		g_proficiency_score += max_diff_axl;
-
-		// 熟練度表示
-		count ++;
-		if(count > 10) {
-			count = 0;
-			char text[200];
-			sprintf(text, "Score = %f", g_proficiency_score);
-			LOG_output(text, 1);
-		}
-
-		//----- センサ値をMTQQ brokerへpublis
-		// JSONフォーマット作成
-		StaticJsonDocument<200> doc_in;
-		doc_in["AxlDiff"] = max_diff_axl;
-		doc_in["Temp"] = temperature;
-		doc_in["Bright"] = als_val;
-		doc_in["Prox"] = ps_val;
-		doc_in["P-Score"] = g_proficiency_score;
-		// payloadにセットさ_れたJSON形式メッセージをpublish
-		char payload[200];
-		serializeJson(doc_in, payload);
-		g_mqtt_client.publish(mqttTopic_Sensor, payload);
-		
 		if(g_is_signal_recieved == 0) {
 			// 信号機情報を一度も受信していない場合は要求する
 			MQTT_publish_query("Signal");
 		}
 	}
-	
+
 }
 
 void osTask_robo_car(void* param)
@@ -698,7 +586,8 @@ void osTask_robo_car(void* param)
 		else if(getstr == 't') {
 			LOG_output("Line Trace Mode", 5);
 			g_ctrl_mode = CTRLMODE_LINE_TRACKING;
-			wait_tick = 5/portTICK_RATE_MS; // 5[ms]
+			int wait_ms = 10; // [ms]
+			wait_tick = wait_ms/portTICK_RATE_MS;
 			RoboCar_move_forward(g_motor_speed);
 		}
 
@@ -852,6 +741,7 @@ void osTask_Serial(void* param)
 
 void setup()
 {
+	int is_success = 1;
 	byte rc;
 
 	g_ctrl_mode = CTRLMODE_MANUAL_DRIVE;
@@ -860,21 +750,22 @@ void setup()
 	Serial.begin(9600);
 	// I2C 初期設定
 	Wire.begin(IO_PIN_SDA, IO_PIN_SCL);
+#if WIFI_ENABLE
 	// WiFi初期設定
 	WiFi.begin(ssid, password);
 	int cnt = 0;
-	int is_success = true;
+	int wifi_success = true;
 	while (WiFi.status() != WL_CONNECTED) {
 		delay(500);
 		Serial.print("Connecting to ");
 		Serial.println(ssid);
 		cnt ++;
 		if(cnt > 30) {
-			is_success = false;
+			wifi_success = false;
 			break;
 		}
 	}
-	if(is_success) {
+	if(wifi_success) {
 		Serial.println("Connected to the WiFi network.");
 		// WiFi アクセスポイントから付与されたIPアドレス
 		Serial.print("WiFi connected IP address: ");
@@ -887,9 +778,10 @@ void setup()
 		MQTT_reconnect();
 	}
 	else {
+		is_success = 0;
 		Serial.println("[Errol] Cannot connected to the WiFi network");
 	}
-
+#endif
 
 	pinMode(IO_PIN_US_ECHO, INPUT);    
 	pinMode(IO_PIN_US_TRIG, OUTPUT);  
@@ -925,39 +817,32 @@ void setup()
     SERVO_set_angle(0);//********xxxxx setservo position according to scaled value
     delay(500); 
 
-  	// 照度・近接センサの初期設定
-	rc = rpr0521rs.init();
-	if(rc != 0) {
-		Serial.println("[Error] cannot initialize RPR-0521.");
-	}
-
-	// 加速度センサ初期化
-	MPU6050_init(&Wire);
-
 	// Task間通信用のQueue生成
 	g_xQueue_Serial = xQueueCreate(8, sizeof(int32_t));
-	// Task生成(優先度は数が大きいほど優先度高)
+	// Task生成(優先度は数が大きいほど優先度高) RoboCar制御はCore#0にする
 	g_xMutex = xSemaphoreCreateMutex();
-	xTaskCreatePinnedToCore(osTask_sensor, "osTask_sensor", 2048, NULL, 5, NULL, 0);
-	xTaskCreatePinnedToCore(osTask_WiFi, "osTask_WiFi", 2048, NULL, 2, NULL, 0);
-	xTaskCreatePinnedToCore(osTask_disp, "osTask_disp", 2048, NULL, 1, NULL, 0);
-	xTaskCreatePinnedToCore(osTask_robo_car, "osTask_robo_car", 2048, NULL, 3, NULL, 0);
-	xTaskCreatePinnedToCore(osTask_Serial, "osTask_Serial", 2048, NULL, 4, NULL, 0);
-
-	// LED点灯
-	for(int i = 0; i < 3; i ++) {
-		digitalWrite(IO_PIN_LED, HIGH);
-		delay(1000);
-		digitalWrite(IO_PIN_LED, LOW);
-		delay(1000);
-	}
+#if WIFI_ENABLE
+	xTaskCreatePinnedToCore(osTask_WiFi, "osTask_WiFi", 2048, NULL, 2, NULL, 1);
+#endif
+	xTaskCreatePinnedToCore(osTask_robo_car, "osTask_robo_car", 2048, NULL, 1, NULL, 0);
+	xTaskCreatePinnedToCore(osTask_Serial, "osTask_Serial", 2048, NULL, 4, NULL, 1);
 
 	// payloadにセットされたJSON形式メッセージを投稿
 	char text[200];
 	sprintf(text, "{\"Init\":\"Pass\"}");
 	g_mqtt_client.publish(mqttTopic_Status, text);
 
-	Serial.println("Completed setup program successfully.");
+	if(is_success) {
+		// LED点灯
+		for(int i = 0; i < 3; i ++) {
+			digitalWrite(IO_PIN_LED, HIGH);
+			delay(1000);
+			digitalWrite(IO_PIN_LED, LOW);
+			delay(1000);
+		}
+
+		Serial.println("Completed setup program successfully.");
+	}
 }
 
 void loop()
