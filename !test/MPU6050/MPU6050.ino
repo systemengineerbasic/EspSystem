@@ -21,7 +21,7 @@ void setup()
 	pinMode(IO_PIN_LED, OUTPUT);
 
 	// ボーレートを115200bpsにセット
-	Serial.begin(115200);
+	Serial.begin(9600);
 
 	// I2C初期化	
 	Wire.begin(IO_PIN_SDA, IO_PIN_SCL);
