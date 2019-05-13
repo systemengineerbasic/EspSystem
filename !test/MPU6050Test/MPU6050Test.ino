@@ -3,7 +3,7 @@
 // I2CにアクセスするためにWireライブラリを使用
 #include <Wire.h>
 
-#include "dev_MPU6050.h"
+#include <MPU6050.h>
 
 
 // I2C
