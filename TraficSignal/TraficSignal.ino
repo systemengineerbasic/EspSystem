@@ -16,6 +16,8 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
+#define WIFI_ENABLE	(1)
+
 //const char* ssid = "SPWN_H36_ED08D1";
 //const char* password = "ht3yf214i7e89ty";
 const char* ssid = "L01_B0E5ED682BFE";
@@ -42,11 +44,13 @@ void setup() {
   pinMode(RED_PIN, OUTPUT);
   pinMode(YELLOW_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
+  Serial.begin(9600);
+#if WIFI_ENABLE
   WiFi.mode(WIFI_STA);
-  Serial.begin(115200);
   setupWifi();
   client.setServer(mqttServer, mqtt_port);
 //  client.setCallback(callback);
+#endif
 }
 
 void setupWifi() {
@@ -57,6 +61,7 @@ void setupWifi() {
   Serial.print("Connecting to ");
   Serial.println(ssid);
 
+#if WIFI_ENABLE
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -68,6 +73,7 @@ void setupWifi() {
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+#endif
 }
 
 /*
@@ -116,10 +122,12 @@ void reconnect() {
   }
 }
 void loop() {
+#if WIFI_ENABLE
   if (!client.connected()) {
     reconnect();
   }
   client.loop();
+#endif
   // payloadに{"deviceName":"Signal01","LED":光っている信号の色}をセット
   digitalWrite(BLUE_PIN, HIGH);
   Serial.println("BLUE");
@@ -127,14 +135,14 @@ void loop() {
     String payload1 = "{\"deviceName\":\"";
     payload1 += mqttDeviceId;
     payload1 += "\",\"LED\":";
-    payload1 += "BLUE";
+    payload1 += "\"BLUE\"";
     payload1 += "}";
     Serial.print("Publish message: ");
     Serial.println(payload1);
     // payloadにセットされたJSON形式メッセージを投稿
     client.publish(mqttTopic, (char*) payload1.c_str());
 
-  delay (15000);
+  delay (5000);
   digitalWrite(BLUE_PIN, LOW);
 
   digitalWrite(YELLOW_PIN, HIGH);
@@ -143,14 +151,14 @@ void loop() {
     String payload2 = "{\"deviceName\":\"";
     payload2 += mqttDeviceId;
     payload2 += "\",\"LED\":";
-    payload2 += "YELLOW";
+    payload2 += "\"YELLOW\"";
     payload2 += "}";
     Serial.print("Publish message: ");
     Serial.println(payload2);
     // payloadにセットされたJSON形式メッセージを投稿
     client.publish(mqttTopic, (char*) payload2.c_str());
 
-  delay (5000);
+  delay (2000);
   digitalWrite(YELLOW_PIN, LOW);
 
   digitalWrite(RED_PIN, HIGH);
@@ -159,14 +167,14 @@ void loop() {
     String payload3 = "{\"deviceName\":\"";
     payload3 += mqttDeviceId;
     payload3 += "\",\"LED\":";
-    payload3 += "RED";
+    payload3 += "\"RED\"";
     payload3 += "}";
     Serial.print("Publish message: ");
     Serial.println(payload3);
     // payloadにセットされたJSON形式メッセージを投稿
     client.publish(mqttTopic, (char*) payload3.c_str());
 
-  delay (15000);
+  delay (5000);
   digitalWrite(RED_PIN, LOW);
   
 }
