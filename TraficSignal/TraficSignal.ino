@@ -16,7 +16,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-#define WIFI_ENABLE	(1)
+#define WIFI_ENABLE	(0)
 
 //const char* ssid = "SPWN_H36_ED08D1";
 //const char* password = "ht3yf214i7e89ty";
