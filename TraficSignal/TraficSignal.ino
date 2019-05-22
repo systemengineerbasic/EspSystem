@@ -16,19 +16,18 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-#define WIFI_ENABLE	(0)
+#define WIFI_ENABLE	(1)
 
-//const char* ssid = "SPWN_H36_ED08D1";
-//const char* password = "ht3yf214i7e89ty";
 const char* ssid = "L01_B0E5ED682BFE";
 const char* password = "d3qart6mhna8m8j";
 //自分で設定した CloudMQTT の Instance info から取得
-const char* mqttServer = "m15.cloudmqtt.com";
+const char* mqttServer = "m16.cloudmqtt.com";
 const char* mqttDeviceId = "Signal01";
-const char* mqttUser = "niccngso";
-const char* mqttPassword = "6UKWREecCBYB";
-const int mqtt_port = 13415;
-const char* mqttTopic = "KM/Signal2";
+const char* mqttUser = "vsscjrry";
+const char* mqttPassword = "kurgC_M_VZmF";
+const int mqtt_port = 17555;
+const char* mqttTopic_Signal = "KM/Signal";
+const char* mqttTopic_Command = "KM/Command";
 const int RED_PIN = 13;
 const int YELLOW_PIN = 12;
 const int BLUE_PIN = 14;
@@ -40,6 +39,46 @@ PubSubClient client(espClient);
 unsigned long lastUpdateMillis = 0;
 unsigned int value = 0;
 
+void MQTT_callback(char* topic, byte* payload, unsigned int length) 
+{
+	Serial.println("MQTT_callback");
+	//----- JSON形式のデータを取り出す
+	StaticJsonDocument<200> doc;
+	// Deserialize
+	deserializeJson(doc, payload);
+	// extract the data
+	JsonObject object = doc.as<JsonObject>();
+	if(strcmp(topic, mqttTopic_Command) == 0) {
+		Serial.println("MQTT_callback[1]");
+		const char* led = object["Signal"];
+		if(led != NULL) {
+			if(strcmp(led, "BLUE") == 0) {
+			}
+			else if(strcmp(led, "YELLOW") == 0) {
+			}
+			else if(strcmp(led, "RED") == 0) {
+			}
+			Serial.print("COMMAND:");
+			Serial.println(led);
+		}
+	}
+}
+
+void osTask_WiFi(void* param)
+{
+	for(;;) {
+		vTaskDelay(200);
+
+#if WIFI_ENABLE
+		if (!client.connected()) {
+			reconnect();
+		}
+		client.loop();
+#endif
+	}
+
+}
+
 void setup() {
   pinMode(RED_PIN, OUTPUT);
   pinMode(YELLOW_PIN, OUTPUT);
@@ -49,7 +88,9 @@ void setup() {
   WiFi.mode(WIFI_STA);
   setupWifi();
   client.setServer(mqttServer, mqtt_port);
-//  client.setCallback(callback);
+  // topicをsubscribeしたときのコールバック関数を登録
+  client.setCallback(MQTT_callback);
+  xTaskCreatePinnedToCore(osTask_WiFi, "osTask_WiFi", 2048, NULL, 2, NULL, 0);
 #endif
 }
 
@@ -109,25 +150,19 @@ void reconnect() {
     // Attempt to connect
     if (client.connect(mqttDeviceId, mqttUser, mqttPassword)) {
       Serial.println("connected");
-      client.subscribe(mqttTopic);
+      client.subscribe(mqttTopic_Command);
       Serial.print("Subscribe:");
-      Serial.println(mqttTopic);
+      Serial.println(mqttTopic_Command);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
-      delay(5000);
+      vTaskDelay(5000);
     }
   }
 }
 void loop() {
-#if WIFI_ENABLE
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-#endif
   // payloadに{"deviceName":"Signal01","LED":光っている信号の色}をセット
   digitalWrite(BLUE_PIN, HIGH);
   Serial.println("BLUE");
@@ -140,9 +175,9 @@ void loop() {
     Serial.print("Publish message: ");
     Serial.println(payload1);
     // payloadにセットされたJSON形式メッセージを投稿
-    client.publish(mqttTopic, (char*) payload1.c_str());
+    client.publish(mqttTopic_Signal, (char*) payload1.c_str());
 
-  delay (5000);
+  vTaskDelay (5000);
   digitalWrite(BLUE_PIN, LOW);
 
   digitalWrite(YELLOW_PIN, HIGH);
@@ -156,9 +191,9 @@ void loop() {
     Serial.print("Publish message: ");
     Serial.println(payload2);
     // payloadにセットされたJSON形式メッセージを投稿
-    client.publish(mqttTopic, (char*) payload2.c_str());
+    client.publish(mqttTopic_Signal, (char*) payload2.c_str());
 
-  delay (2000);
+  vTaskDelay (2000);
   digitalWrite(YELLOW_PIN, LOW);
 
   digitalWrite(RED_PIN, HIGH);
@@ -172,9 +207,9 @@ void loop() {
     Serial.print("Publish message: ");
     Serial.println(payload3);
     // payloadにセットされたJSON形式メッセージを投稿
-    client.publish(mqttTopic, (char*) payload3.c_str());
+    client.publish(mqttTopic_Signal, (char*) payload3.c_str());
 
-  delay (5000);
+  vTaskDelay (5000);
   digitalWrite(RED_PIN, LOW);
   
 }
