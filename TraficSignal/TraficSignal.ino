@@ -18,16 +18,29 @@
 
 #define WIFI_ENABLE	(1)
 
+// Signal Mode
+#define	SM_AUTO			(0)
+#define	SM_BLUE			(1)
+#define	SM_YELLOW		(2)
+#define	SM_RED			(3)
+
+// Signal COLOR
+#define	SCOLOR_BLUE		(0)
+#define	SCOLOR_YELLOW	(1)
+#define	SCOLOR_RED		(2)
+
 const char* ssid = "L01_B0E5ED682BFE";
 const char* password = "d3qart6mhna8m8j";
 //自分で設定した CloudMQTT の Instance info から取得
-const char* mqttServer = "m16.cloudmqtt.com";
+const char* mqttServer = "m10.cloudmqtt.com";
 const char* mqttDeviceId = "Signal01";
-const char* mqttUser = "vsscjrry";
-const char* mqttPassword = "kurgC_M_VZmF";
-const int mqtt_port = 17555;
+const char* mqttUser = "rkinkmdk";
+const char* mqttPassword = "IAzU6d_IdX0W";
+const int mqtt_port = 14519;
 const char* mqttTopic_Signal = "KM/Signal";
 const char* mqttTopic_Command = "KM/Command";
+
+
 const int RED_PIN = 13;
 const int YELLOW_PIN = 12;
 const int BLUE_PIN = 14;
@@ -36,12 +49,17 @@ const int BLUE_PIN = 14;
 //WiFiClientSecure espClient;
 WiFiClient espClient;
 PubSubClient client(espClient);
-unsigned long lastUpdateMillis = 0;
-unsigned int value = 0;
+
+QueueHandle_t g_xQueue_Command;
+
+
+int g_signal_mode = SM_AUTO;
+int g_signal_color = SCOLOR_RED;
+int g_signal_timing_count = 0;
+
 
 void MQTT_callback(char* topic, byte* payload, unsigned int length) 
 {
-	Serial.println("MQTT_callback");
 	//----- JSON形式のデータを取り出す
 	StaticJsonDocument<200> doc;
 	// Deserialize
@@ -49,22 +67,30 @@ void MQTT_callback(char* topic, byte* payload, unsigned int length)
 	// extract the data
 	JsonObject object = doc.as<JsonObject>();
 	if(strcmp(topic, mqttTopic_Command) == 0) {
-		Serial.println("MQTT_callback[1]");
 		const char* led = object["Signal"];
 		if(led != NULL) {
+			int signal_mode = 0;
 			if(strcmp(led, "BLUE") == 0) {
+				signal_mode = SM_BLUE;
 			}
 			else if(strcmp(led, "YELLOW") == 0) {
+				signal_mode = SM_YELLOW;
 			}
 			else if(strcmp(led, "RED") == 0) {
+				signal_mode = SM_RED;
 			}
+			else {
+				signal_mode = SM_AUTO;
+			}
+			// Send Q-message to command queue
+	        xQueueSend(g_xQueue_Command, &signal_mode, 0);
 			Serial.print("COMMAND:");
 			Serial.println(led);
 		}
 	}
 }
 
-void osTask_WiFi(void* param)
+void osTask_MQTT(void* param)
 {
 	for(;;) {
 		vTaskDelay(200);
@@ -79,7 +105,98 @@ void osTask_WiFi(void* param)
 
 }
 
-void setup() {
+void osTask_Signal(void* param)
+{
+	for(;;) {
+		int q_data = 0;
+		int wait_time = 1000; // [ms]
+		BaseType_t	xStatus = xQueueReceive(g_xQueue_Command, &q_data, wait_time/portTICK_RATE_MS);
+		if(xStatus) { // if you receive some data from queue.
+			g_signal_mode = q_data;
+			g_signal_timing_count = 0; // Reset counter
+			
+			Serial.println("Receive queue");
+			if(g_signal_mode == SM_BLUE) {
+				set_signal_color(SCOLOR_BLUE);
+			}
+			else if(g_signal_mode == SM_YELLOW) {
+				set_signal_color(SCOLOR_YELLOW);
+			}
+			else if(g_signal_mode == SM_RED) {
+				set_signal_color(SCOLOR_RED);
+			}
+		}
+		
+		// LED signal rotation(B -> Y -> R)
+		if(g_signal_mode == SM_AUTO) {
+			g_signal_timing_count ++;
+			if(g_signal_color == SCOLOR_BLUE) {
+				if(g_signal_timing_count >= 5) { // Blue -> Yellow
+					set_signal_color(SCOLOR_YELLOW);
+					g_signal_timing_count = 0;
+				}
+			}
+			else if(g_signal_color == SCOLOR_YELLOW) {
+				if(g_signal_timing_count >= 2) { // Yellow -> Red
+					set_signal_color(SCOLOR_RED);
+					g_signal_timing_count = 0;
+				}
+			}
+			else {
+				if(g_signal_timing_count >= 5) { // Red -> Blue
+					set_signal_color(SCOLOR_BLUE);
+					g_signal_timing_count = 0;
+				}
+			}
+		}
+
+	}
+
+}
+
+//
+// set LED signal color
+//
+void set_signal_color(int color)
+{
+	String str_color;
+	g_signal_color = color;
+	
+	// Turn on/off for each LED
+	if(g_signal_color == SCOLOR_BLUE) {
+		str_color = "BLUE";
+		digitalWrite(BLUE_PIN, HIGH);
+		digitalWrite(YELLOW_PIN, LOW);
+		digitalWrite(RED_PIN, LOW);
+	}
+	else if(g_signal_color == SCOLOR_YELLOW) {
+		str_color = "YELLOW";
+		digitalWrite(BLUE_PIN, LOW);
+		digitalWrite(YELLOW_PIN, HIGH);
+		digitalWrite(RED_PIN, LOW);
+	}
+	else {
+		str_color = "RED";
+		digitalWrite(BLUE_PIN, LOW);
+		digitalWrite(YELLOW_PIN, LOW);
+		digitalWrite(RED_PIN, HIGH);
+	}
+
+	// Create JSON formatted message
+	String payload = "{\"deviceName\":\"";
+	payload += mqttDeviceId;
+	payload += "\",\"LED\":\"";
+	payload += str_color;
+	payload += "\"}";
+	Serial.print("Publish message: ");
+	Serial.println(payload);
+
+	// Publish JSON formatted message to MQTT broker
+	client.publish(mqttTopic_Signal, (char*) payload.c_str());
+}
+
+void setup()
+{
   pinMode(RED_PIN, OUTPUT);
   pinMode(YELLOW_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
@@ -90,8 +207,16 @@ void setup() {
   client.setServer(mqttServer, mqtt_port);
   // topicをsubscribeしたときのコールバック関数を登録
   client.setCallback(MQTT_callback);
-  xTaskCreatePinnedToCore(osTask_WiFi, "osTask_WiFi", 2048, NULL, 2, NULL, 0);
 #endif
+
+  // Create queue for receive command from web.
+  g_xQueue_Command = xQueueCreate(8, sizeof(int32_t));
+  // Create tasks 
+  xTaskCreatePinnedToCore(osTask_MQTT, "osTask_MQTT", 2048, NULL, 5, NULL, 0);
+  xTaskCreatePinnedToCore(osTask_Signal, "osTask_Signal", 4096, NULL, 3, NULL, 0);
+
+  set_signal_color(SCOLOR_RED);
+
 }
 
 void setupWifi() {
@@ -117,32 +242,6 @@ void setupWifi() {
 #endif
 }
 
-/*
- *  ボタンが押されたことを確認するために MQTT に Callback する処理
-void callback(char* topic, byte* payload, unsigned int length) {
-  
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-  // JSON形式で送られたメッセージの中身を取り出すためのバッファを準備
-  StaticJsonBuffer<200> jsonBuffer;
-  // JSON形式の中身を取り出して、rootに入れる
-  JsonObject& root = jsonBuffer.parseObject((char*) payload);
-
-  // rootからbuttonを値を取り出してinValueに入れる
-  int  inValue = root["button"];
-
-  Serial.print("inValue:");
-  Serial.println(inValue);
-  // IO13 ピンにつながっている LED の電圧を Value 値で変更させることで、LED の光量を変動させる。
-  analogWrite(13,inValue);
-}
-*/
-
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
@@ -163,53 +262,4 @@ void reconnect() {
   }
 }
 void loop() {
-  // payloadに{"deviceName":"Signal01","LED":光っている信号の色}をセット
-  digitalWrite(BLUE_PIN, HIGH);
-  Serial.println("BLUE");
-
-    String payload1 = "{\"deviceName\":\"";
-    payload1 += mqttDeviceId;
-    payload1 += "\",\"LED\":";
-    payload1 += "\"BLUE\"";
-    payload1 += "}";
-    Serial.print("Publish message: ");
-    Serial.println(payload1);
-    // payloadにセットされたJSON形式メッセージを投稿
-    client.publish(mqttTopic_Signal, (char*) payload1.c_str());
-
-  vTaskDelay (5000);
-  digitalWrite(BLUE_PIN, LOW);
-
-  digitalWrite(YELLOW_PIN, HIGH);
-  Serial.println("YELLOW");
-
-    String payload2 = "{\"deviceName\":\"";
-    payload2 += mqttDeviceId;
-    payload2 += "\",\"LED\":";
-    payload2 += "\"YELLOW\"";
-    payload2 += "}";
-    Serial.print("Publish message: ");
-    Serial.println(payload2);
-    // payloadにセットされたJSON形式メッセージを投稿
-    client.publish(mqttTopic_Signal, (char*) payload2.c_str());
-
-  vTaskDelay (2000);
-  digitalWrite(YELLOW_PIN, LOW);
-
-  digitalWrite(RED_PIN, HIGH);
-  Serial.println("RED");
-    
-    String payload3 = "{\"deviceName\":\"";
-    payload3 += mqttDeviceId;
-    payload3 += "\",\"LED\":";
-    payload3 += "\"RED\"";
-    payload3 += "}";
-    Serial.print("Publish message: ");
-    Serial.println(payload3);
-    // payloadにセットされたJSON形式メッセージを投稿
-    client.publish(mqttTopic_Signal, (char*) payload3.c_str());
-
-  vTaskDelay (5000);
-  digitalWrite(RED_PIN, LOW);
-  
 }
