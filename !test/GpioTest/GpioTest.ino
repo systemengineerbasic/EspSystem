@@ -1,5 +1,13 @@
+/*******************************************************************
+    GpioTest.ino
+       
+    While you keep pushing button, LED is turned ON.
+
+*******************************************************************/
+
+
 #define	PIN_LED		(2)
-#define	PIN_SW		(0)
+#define	PIN_BUTTON	(0)
 
 
 //=====================================
@@ -25,20 +33,20 @@ void set_led_status(int status) // status : 0->Off, not zero->On
 }
 
 //=====================================
-// Initialize push switch
+// Initialize button
 //=====================================
-void init_sw()
+void init_button()
 {
-    pinMode(PIN_SW, INPUT);
+    pinMode(PIN_BUTTON, INPUT);
 }
 
 //=====================================
-// Get push switch status(On or Off)
+// Get button status(On or Off)
 //=====================================
-int get_sw_status()
+int get_button_status()
 {
-	int sw_status = digitalRead(PIN_SW);
-    if(sw_status == 0) { // If sw is pushed
+	int button_status = digitalRead(PIN_BUTTON);
+    if(button_status == 0) { // If button is pushed
         return  1;
     }
     else {
@@ -53,8 +61,8 @@ void setup()
 {
     // Initialize LED
     init_led();
-    // Initialize push switch
-    init_sw();
+    // Initialize button
+    init_button();
 }
 
 //=====================================
@@ -62,10 +70,10 @@ void setup()
 //=====================================
 void loop() 
 {
-    int sw_status;
-	sw_status = get_sw_status();
+    int button_status;
+	button_status = get_button_status();
 	
-    if(sw_status) { // If sw is pushed, turn on LED.
+    if(button_status) { // If button is pushed, turn on LED.
         set_led_status(1);
     }
     else {
