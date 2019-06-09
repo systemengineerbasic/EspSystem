@@ -1,3 +1,4 @@
+#include "BluetoothSerial.h"
 
 //---------------------- PIN ----------------------
 // Motor
@@ -18,6 +19,8 @@
 #define	MOTOR_DIR_FWD				(1)
 #define	MOTOR_DIR_REV				(2)
 
+
+BluetoothSerial SerialBT;
 
 int g_motor_speed = 180;
 
@@ -134,14 +137,17 @@ void setup()
     // Initialize serial-port (115200bps)
     Serial.begin(115200);
 
+    // Initialize Bluetooth
+	SerialBT.begin("ESP32");
+
     // Initialize motor
     MOTOR_init();
 }
 
 void loop()
 {
-    if(Serial.available() > 0) { // received data
-        int getstr = Serial.read(); // Read data from serial-port
+    if(SerialBT.available() > 0) { // received data
+        int getstr = SerialBT.read(); // Read data from serial-port
         
         if(getstr == 's') {
         	MOTOR_set_speed_left(MOTOR_DIR_FWD, 0);
