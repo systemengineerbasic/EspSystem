@@ -1,4 +1,4 @@
-const int LED_PIN = 2; // PWMèoóÕÇ∑ÇÈPin No.
+#define PIN_LED (2)
 // use first channel of 16 channels (started from zero)
 #define LEDC_CHANNEL_0 0
 // use 13 bit precission for LEDC timer
@@ -8,50 +8,36 @@ const int LED_PIN = 2; // PWMèoóÕÇ∑ÇÈPin No.
 
 // Arduino like analogWrite
 // value has to be between 0 and valueMax
-void ledcAnalogWrite(uint8_t channel, uint32_t value, uint32_t valueMax = 255) {
- // calculate duty, 8191 from 2 ^ 13 - 1
- uint32_t duty = (8191 / valueMax) * min(value, valueMax);
+void ledcAnalogWrite(uint8_t channel, uint32_t value, uint32_t valueMax = 255) 
+{
+    // calculate duty, 8191 from 2 ^ 13 - 1
+    uint32_t duty = (8191 / valueMax) * min(value, valueMax);
 
-// write duty to LEDC
- ledcWrite(channel, duty);
+    // write duty to LEDC
+    ledcWrite(channel, duty);
 }
 
-void setup() {
- // Setup timer and attach timer to a led pin
- Serial.begin(9600);
- ledcSetup(LEDC_CHANNEL_0, LEDC_BASE_FREQ, LEDC_TIMER_13_BIT);
- ledcAttachPin(LED_PIN, LEDC_CHANNEL_0);
+void setup() 
+{
+    // Setup timer and attach timer to a led pin
+    Serial.begin(115200);
+    ledcSetup(LEDC_CHANNEL_0, LEDC_BASE_FREQ, LEDC_TIMER_13_BIT);
+    ledcAttachPin(PIN_LED, LEDC_CHANNEL_0);
 }
 
-void loop(){
+void loop()
+{
+    Serial.println("LED On(light)");
+    ledcAnalogWrite(LEDC_CHANNEL_0, 255);
+    delay(2000);
 
-//  for(int i=0; i<256; i++){
-//    ledcAnalogWrite(LEDC_CHANNEL_0, i);
-//    delay(100); // change delay time can breath faster or slower
-//   }
-   Serial.println("LED On");
-   ledcAnalogWrite(LEDC_CHANNEL_0, 255);
-   delay(2000);
+    Serial.println("LED On(dark)");
+    ledcAnalogWrite(LEDC_CHANNEL_0, 31);
+    delay(2000);
 
-   Serial.println("LED Off");
-   ledcAnalogWrite(LEDC_CHANNEL_0, 0);
-   delay(2000);
+    Serial.println("LED Off");
+    ledcAnalogWrite(LEDC_CHANNEL_0, 0);
+    delay(2000);
 }
 
 
-/*
-void setup() {
-  pinMode(2, OUTPUT);     // Initialize the LED_BUILTIN pin as an output
-}
-
-// the loop function runs over and over again forever
-void loop() {
-  digitalWrite(2, LOW);   // Turn the LED on (Note that LOW is the voltage level
-                                    // but actually the LED is on; this is because 
-                                    // it is acive low on the ESP-01)
-  delay(2000);                      // Wait for a second
-  digitalWrite(2, HIGH);  // Turn the LED off by making the voltage HIGH
-  delay(1000);                      // Wait for two seconds (to demonstrate the active low LED)
-}
-
-*/
