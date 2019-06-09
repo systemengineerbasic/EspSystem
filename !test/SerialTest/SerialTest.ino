@@ -1,8 +1,7 @@
 
 void setup() 
 {
-	// 転送レートを9600bpsに設定
-	Serial.begin(9600);
+	Serial.begin(115200);
 }
 
 void loop() 
@@ -10,17 +9,17 @@ void loop()
 	int i;
 	int time;
 	for(i = 0; i < 5; i ++) {
-		// 経過時間取得
+		// get spendingtime
 		time = millis();
-		// シリアルモニタへ出力
-		Serial.print(time); // シリアルへ時間出力（改行なし）
+		// output to serial-monitor
+		Serial.print(time); // time(without line feed)
 		Serial.print("[msec], ");
-		// 1000msec待つ
+		// wait for 1000msec
 		delay(1000);
 	}
-	Serial.println(); // 改行
-	Serial.println("Hello World"); // 文字列出力（改行あり）
-	Serial.println(); // 改行
+	Serial.println(); // line feed
+	Serial.println("Hello World"); // output string (and line feed)
+	Serial.println(); // line feed
 
 	delay(2000);
 }
