@@ -37,8 +37,10 @@ void loop()
         else {
         	Serial.print("Hello ??? "); // output string (and line feed)
         }
-        Serial.print(time);
-        Serial.println("[msec]");
+        
+        char txt[128];
+        sprintf(txt, "%d [msec]\n", time);
+        Serial.print(txt);
     }
 
 	g_count ++;
