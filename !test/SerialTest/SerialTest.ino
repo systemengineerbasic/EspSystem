@@ -1,25 +1,46 @@
+#define MODE_HELLO_WORLD    (0)
+#define MODE_HELLO_KM       (1)
+
+
+int g_display_mode;
+int g_count = 0;
 
 void setup() 
 {
 	Serial.begin(115200);
+	
+	g_display_mode = MODE_HELLO_WORLD;
 }
 
 void loop() 
 {
-	int i;
-	int time;
-	for(i = 0; i < 5; i ++) {
-		// get spendingtime
-		time = millis();
-		// output to serial-monitor
-		Serial.print(time); // time(without line feed)
-		Serial.print("[msec], ");
-		// wait for 1000msec
-		delay(1000);
-	}
-	Serial.println(); // line feed
-	Serial.println("Hello World"); // output string (and line feed)
-	Serial.println(); // line feed
+	if(Serial.available() > 0) {
+        // read character from serial port
+		int getstr = Serial.read();
+		if(getstr == 'w') {
+            g_display_mode = MODE_HELLO_WORLD;
+        }
+		else if(getstr == 'k') {
+            g_display_mode = MODE_HELLO_KM;
+        }
+    }
 
-	delay(2000);
+	if(g_count > 50) {
+        g_count = 0;
+		int time = millis(); // get time
+    	if(g_display_mode == MODE_HELLO_WORLD) {
+        	Serial.print("Hello World "); // output string (and line feed)
+        }
+        else if(g_display_mode == MODE_HELLO_KM) {
+        	Serial.print("Hello KM "); // output string (and line feed)
+        }
+        else {
+        	Serial.print("Hello ??? "); // output string (and line feed)
+        }
+        Serial.print(time);
+        Serial.println("[msec]");
+    }
+
+	g_count ++;
+    delay(20);
 }
