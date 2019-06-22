@@ -1,17 +1,11 @@
 #include "BluetoothSerial.h"
+#include "my_cmd.h"
 
 BluetoothSerial SerialBT;
 Stream* g_pSerial=&Serial;
 
 char    g_command_line[256];
 int     g_cmd_index = 0;
-
-struct _command_info{
-    char*   cmd;
-    void    (*proc)(int argc, char* argv[]);
-};
-
-typedef struct _command_info T_command_info;
 
 
 //=====================================
@@ -42,52 +36,6 @@ T_command_info  g_command_table[] = {
 };
 
 
-int parse_cmdline(char* cmd_line, char* argv[])
-{
-    int argc = 0;
-    char* p = NULL;
-    char* str = cmd_line;
-    while(1) {
-        p = strtok(str, " ");
-        if(p != NULL){
-            str = NULL;
-            argv[argc] = p;
-            argc ++;
-        }
-        else {
-            break;
-        }
-    }
-    
-    return  argc;
-}
-
-int parse_and_exec_cmd(char* cmdline, T_command_info cmd_table[])
-{
-    // Parse command line
-    char* argv[10];
-    int argc = parse_cmdline(cmdline, argv);
-
-    // Search cmd_table and execute the command
-    if(argc > 0) {
-        for(int i = 0; ; i ++) {
-            if(cmd_table[i].cmd != NULL) {
-                if(strcmp(argv[0], cmd_table[i].cmd) == 0) {
-                    // Find a command in the cmd_table
-                    cmd_table[i].proc(argc, argv);
-                    break;
-                }
-            }
-            else {
-                // The last line
-                return 0;
-            }
-        }
-    }
-    
-    return  1;
-}
-
 void setup() 
 {
     // Initialize serial-port (115200bps)
@@ -97,8 +45,8 @@ void setup()
 	SerialBT.begin("ESP32-12135");
 	
 	// Select standard I/O
-    //g_pSerial = &SerialBT;
-    g_pSerial = &Serial;
+    g_pSerial = &SerialBT;
+    //g_pSerial = &Serial;
 }
 
 void loop()
@@ -107,7 +55,7 @@ void loop()
         char getstr = g_pSerial->read(); // Read data from serial-port
         g_command_line[g_cmd_index] = getstr;
         g_cmd_index ++;
-        if(getstr == '\n') {
+        if(getstr == '\n') { // Detect "LF"(enter key)
             g_command_line[g_cmd_index-1] = '\0';
             g_cmd_index = 0;
             
