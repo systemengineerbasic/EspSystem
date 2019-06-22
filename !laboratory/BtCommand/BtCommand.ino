@@ -11,12 +11,17 @@ int     g_cmd_index = 0;
 //=====================================
 // Command procedures
 //=====================================
-void    _cmd__speed(int argc, char* argv[])
+void    _cmd__add(int argc, char* argv[])
 {
-    if(argc > 1) {
-        int speed = atoi(argv[1]);
-        g_pSerial->print("speed = ");
-        g_pSerial->println(speed);
+    if(argc > 2) {
+        int val1 = atoi(argv[1]);
+        int val2 = atoi(argv[2]);
+        char txt[128];
+        sprintf(txt, "%d + %d = %d", val1, val2, val1+val2);
+        g_pSerial->println(txt);
+    }
+    else {
+        g_pSerial->println("argument error");
     }
 }
 
@@ -25,12 +30,41 @@ void    _cmd__right(int argc, char* argv[])
     g_pSerial->println("Right turn");
 }
 
+void    _cmd__serial(int argc, char* argv[])
+{
+    if(argc > 1) {
+        if(strcmp(argv[1], "bt")==0) {
+            g_pSerial = &SerialBT;
+        }
+        else if(strcmp(argv[1], "usb")==0) {
+            g_pSerial = &Serial;
+        }
+    }
+        
+}
+
+void    _cmd__signal(int argc, char* argv[])
+{
+    if(argc > 1) {
+        if(strcmp(argv[1], "r")==0) {
+            g_pSerial->println("Red");
+        }
+        else if(strcmp(argv[1], "y")==0) {
+            g_pSerial->println("Yellow");
+        }
+        else if(strcmp(argv[1], "b")==0) {
+            g_pSerial->println("Blue");
+        }
+    }
+}
+
 //=====================================
 // Command table
 //=====================================
 T_command_info  g_command_table[] = {
-    {"speed",       _cmd__speed},
-    {"right",       _cmd__right},
+    {"add",         _cmd__add},
+    {"serial",      _cmd__serial},
+    {"signal",      _cmd__signal},
     // The last line must be NULL
     {NULL,          NULL},
 };
