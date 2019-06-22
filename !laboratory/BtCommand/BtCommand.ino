@@ -5,8 +5,40 @@ BluetoothSerial SerialBT;
 char    g_command_line[256];
 int     g_cmd_index = 0;
 
+struct _command_info{
+    char*   cmd;
+    int    (*proc)(int argc, char* argv[]);
+};
 
-int parse(char* cmd_line, char* argv[])
+typedef struct _command_info T_command_info;
+
+
+int    _cmd__speed(int argc, char* argv[])
+{
+    if(argc > 1) {
+        int speed = atoi(argv[1]);
+        SerialBT.print("speed = ");
+        SerialBT.println(speed);
+    }
+    
+    return  0;
+}
+
+int    _cmd__right(int argc, char* argv[])
+{
+    SerialBT.println("Right turn");
+    return  1;
+}
+
+T_command_info  g_command_table[] = {
+    {"speed",       _cmd__speed},
+    {"right",       _cmd__right},
+    // The last line must be NULL
+    {NULL,          NULL},
+};
+
+
+int parse_cmdline(char* cmd_line, char* argv[])
 {
     int argc = 0;
     char* p = NULL;
@@ -50,19 +82,22 @@ void loop()
     
             // Parse command line
             char* argv[10];
-            int argc = parse(g_command_line, argv);
-            
-            // Command procedures
-            if(strcmp(argv[0], "speed") == 0) {
-                if(argc > 1) {
-                    int speed = atoi(argv[1]);
-                    SerialBT.print("speed = ");
-                    SerialBT.println(speed);
+            int argc = parse_cmdline(g_command_line, argv);
+            // Search and execute command
+            if(argc > 0) {
+                for(int i = 0; ; i ++) {
+                    if(g_command_table[i].cmd != NULL) {
+                        if(strcmp(argv[0], g_command_table[i].cmd) == 0) {
+                            g_command_table[i].proc(argc, argv);
+                        }
+                    }
+                    else {
+                        // The last line
+                        break;
+                    }
                 }
             }
-            else if(strcmp(argv[0], "right") == 0) {
-                SerialBT.println("Right turn");
-            }
+            
         }
     }
 
