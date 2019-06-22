@@ -1,6 +1,7 @@
 #include "BluetoothSerial.h"
 
 BluetoothSerial SerialBT;
+Stream* g_pSerial=&Serial;
 
 char    g_command_line[256];
 int     g_cmd_index = 0;
@@ -20,14 +21,14 @@ void    _cmd__speed(int argc, char* argv[])
 {
     if(argc > 1) {
         int speed = atoi(argv[1]);
-        SerialBT.print("speed = ");
-        SerialBT.println(speed);
+        g_pSerial->print("speed = ");
+        g_pSerial->println(speed);
     }
 }
 
 void    _cmd__right(int argc, char* argv[])
 {
-    SerialBT.println("Right turn");
+    g_pSerial->println("Right turn");
 }
 
 //=====================================
@@ -87,7 +88,6 @@ int parse_and_exec_cmd(char* cmdline, T_command_info cmd_table[])
     return  1;
 }
 
-Stream* g_pSerial=NULL;
 void setup() 
 {
     // Initialize serial-port (115200bps)
@@ -96,13 +96,15 @@ void setup()
     // Initialize Bluetooth
 	SerialBT.begin("ESP32-12135");
 	
-    g_pSerial = &SerialBT;
+	// Select standard I/O
+    //g_pSerial = &SerialBT;
+    g_pSerial = &Serial;
 }
 
 void loop()
 {
-    if(SerialBT.available() > 0) { // received data
-        char getstr = SerialBT.read(); // Read data from serial-port
+    if(g_pSerial->available() > 0) { // received data
+        char getstr = g_pSerial->read(); // Read data from serial-port
         g_command_line[g_cmd_index] = getstr;
         g_cmd_index ++;
         if(getstr == '\n') {
@@ -112,10 +114,8 @@ void loop()
             // Parse and execute command
             int err = parse_and_exec_cmd(g_command_line, g_command_table);
             if(err == 0) {
-                SerialBT.println("[Error] cannot find command.");
+                g_pSerial->println("[Error] cannot find command.");
             }
-
-	        SerialBT.print("> ");
         }
     }
 
