@@ -7,29 +7,32 @@ int     g_cmd_index = 0;
 
 struct _command_info{
     char*   cmd;
-    int    (*proc)(int argc, char* argv[]);
+    void    (*proc)(int argc, char* argv[]);
 };
 
 typedef struct _command_info T_command_info;
 
 
-int    _cmd__speed(int argc, char* argv[])
+//=====================================
+// Command procedures
+//=====================================
+void    _cmd__speed(int argc, char* argv[])
 {
     if(argc > 1) {
         int speed = atoi(argv[1]);
         SerialBT.print("speed = ");
         SerialBT.println(speed);
     }
-    
-    return  0;
 }
 
-int    _cmd__right(int argc, char* argv[])
+void    _cmd__right(int argc, char* argv[])
 {
     SerialBT.println("Right turn");
-    return  1;
 }
 
+//=====================================
+// Command table
+//=====================================
 T_command_info  g_command_table[] = {
     {"speed",       _cmd__speed},
     {"right",       _cmd__right},
@@ -58,6 +61,33 @@ int parse_cmdline(char* cmd_line, char* argv[])
     return  argc;
 }
 
+int parse_and_exec_cmd(char* cmdline, T_command_info cmd_table[])
+{
+    // Parse command line
+    char* argv[10];
+    int argc = parse_cmdline(cmdline, argv);
+
+    // Search cmd_table and execute the command
+    if(argc > 0) {
+        for(int i = 0; ; i ++) {
+            if(cmd_table[i].cmd != NULL) {
+                if(strcmp(argv[0], cmd_table[i].cmd) == 0) {
+                    // Find a command in the cmd_table
+                    cmd_table[i].proc(argc, argv);
+                    break;
+                }
+            }
+            else {
+                // The last line
+                return 0;
+            }
+        }
+    }
+    
+    return  1;
+}
+
+Stream* g_pSerial=NULL;
 void setup() 
 {
     // Initialize serial-port (115200bps)
@@ -65,7 +95,8 @@ void setup()
 
     // Initialize Bluetooth
 	SerialBT.begin("ESP32-12135");
-
+	
+    g_pSerial = &SerialBT;
 }
 
 void loop()
@@ -76,28 +107,15 @@ void loop()
         g_cmd_index ++;
         if(getstr == '\n') {
             g_command_line[g_cmd_index-1] = '\0';
-            SerialBT.print(" >>");
-            SerialBT.println(g_command_line);
             g_cmd_index = 0;
-    
-            // Parse command line
-            char* argv[10];
-            int argc = parse_cmdline(g_command_line, argv);
-            // Search and execute command
-            if(argc > 0) {
-                for(int i = 0; ; i ++) {
-                    if(g_command_table[i].cmd != NULL) {
-                        if(strcmp(argv[0], g_command_table[i].cmd) == 0) {
-                            g_command_table[i].proc(argc, argv);
-                        }
-                    }
-                    else {
-                        // The last line
-                        break;
-                    }
-                }
-            }
             
+            // Parse and execute command
+            int err = parse_and_exec_cmd(g_command_line, g_command_table);
+            if(err == 0) {
+                SerialBT.println("[Error] cannot find command.");
+            }
+
+	        SerialBT.print("> ");
         }
     }
 
