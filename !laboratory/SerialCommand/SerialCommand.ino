@@ -76,11 +76,11 @@ void setup()
     Serial.begin(115200);
 
     // Initialize Bluetooth
-	SerialBT.begin("ESP32-12135");
+	SerialBT.begin("ESP32-xxxxx");
 	
 	// Select standard I/O
-    g_pSerial = &SerialBT;
-    //g_pSerial = &Serial;
+    //g_pSerial = &SerialBT;
+    g_pSerial = &Serial;
 }
 
 void loop()
