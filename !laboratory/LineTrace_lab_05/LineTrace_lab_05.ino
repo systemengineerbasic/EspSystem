@@ -331,18 +331,11 @@ void RoboCar_stop()
 //===================================================================
 int create_event()
 {
-    static int is_first = 1;
-    static int pre_signal_color;
-
     xSemaphoreTake(g_xMutex_Signal, portMAX_DELAY);
     // Å•Å•Å• Start critical section Å•Å•Å•
     int signal_color = g_trafic_signal_color;
     // Å£Å£Å£ End critical section Å£Å£Å£
     xSemaphoreGive(g_xMutex_Signal);
-    if(is_first) {
-        pre_signal_color = signal_color;
-        is_first = 0;
-    }
 
     // Get tracking sensor value
     int sensor_L = read_sensor_L();
