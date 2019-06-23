@@ -91,6 +91,8 @@ int g_motor_speed = 200;
 
 Stream* g_pSerial=&SerialBT; // Selected serial port (USB is default)
 
+SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
+
 
 //===================================================================
 // Command procedures
@@ -125,6 +127,7 @@ void _cmd__speed(int argc, char* argv[])
 void _cmd__signal(int argc, char* argv[])
 {
     if(argc > 1) {
+        int color = SIGNAL_COLOR_BLACK;
         if(strcmp(argv[1], "r")==0) {
             g_trafic_signal_color = SIGNAL_COLOR_RED;
             g_pSerial->println("Red");
@@ -136,6 +139,14 @@ void _cmd__signal(int argc, char* argv[])
         else if(strcmp(argv[1], "b")==0) {
             g_trafic_signal_color = SIGNAL_COLOR_BLUE;
             g_pSerial->println("Blue");
+        }
+        
+        if(color != SIGNAL_COLOR_BLACK) {
+            xSemaphoreTake(g_xMutex_Signal, portMAX_DELAY);
+            // Å•Å•Å• Start critical section Å•Å•Å•
+            g_trafic_signal_color = color;
+            // Å£Å£Å£ End critical section Å£Å£Å£
+            xSemaphoreGive(g_xMutex_Signal);
         }
     }
 }
@@ -322,8 +333,14 @@ int create_event()
 {
     static int is_first = 1;
     static int pre_signal_color;
+
+    xSemaphoreTake(g_xMutex_Signal, portMAX_DELAY);
+    // Å•Å•Å• Start critical section Å•Å•Å•
+    int signal_color = g_trafic_signal_color;
+    // Å£Å£Å£ End critical section Å£Å£Å£
+    xSemaphoreGive(g_xMutex_Signal);
     if(is_first) {
-        pre_signal_color = g_trafic_signal_color;
+        pre_signal_color = signal_color;
         is_first = 0;
     }
 
@@ -334,12 +351,12 @@ int create_event()
     int sensor = ((sensor_L&0x1)<<2) | ((sensor_C&0x1)<<1) | ((sensor_R&0x1)<<0);
     
     int event = TRACK_EVENT_NONE;
-    if((g_trafic_signal_color==SIGNAL_COLOR_BLUE) && (pre_signal_color!=SIGNAL_COLOR_BLUE)) { // The signal turned blue
+    if((signal_color==SIGNAL_COLOR_BLUE) && (pre_signal_color!=SIGNAL_COLOR_BLUE)) { // The signal turned blue
         event = TRACK_EVENT_TURNED_BLUE;
     }
     else {
         if(sensor == 7) { // "OOO"
-            if(g_trafic_signal_color == SIGNAL_COLOR_RED) {
+            if(signal_color == SIGNAL_COLOR_RED) {
                 event = TRACK_EVENT_OOO_RED;
             }
         }
@@ -347,7 +364,7 @@ int create_event()
             event = sensor;
         }
     }
-	pre_signal_color = g_trafic_signal_color;
+	pre_signal_color = signal_color;
     
     return event;
 }
@@ -377,6 +394,7 @@ int get_next_state(int cur_state, int event)
 //===================================================================
 void Task_line_trace(void* param)
 {
+	xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(10);
 
@@ -414,6 +432,8 @@ void Task_serial_cmd(void* param)
 {
     char    command_line[256];
     int     cmd_index = 0;
+
+	xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(10);
 
@@ -456,6 +476,9 @@ void setup()
     xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 2048, NULL, 1, NULL, 0);
     
+    // Create semaphore
+	g_xMutex_Signal = xSemaphoreCreateMutex();
+
     // Go forward
     RoboCar_stop();
 }
