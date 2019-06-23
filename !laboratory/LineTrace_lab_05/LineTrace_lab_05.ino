@@ -1,64 +1,73 @@
 //==============================================================================
 //
-//		LineTrace_lab_05.ino
-//			
-//			State Machineを用いたLineTrace制御
-//			黒い横線を検出すると停車する
+//  LineTrace_lab_05.ino
+//
+//      Line tracking by RoboCar.
+//      If the car will stop when acrossing black line.
 //
 //==============================================================================
 #include "BluetoothSerial.h"
 #include "my_cmd.h"
 
 
-// Motor Pin
-#define	IO_PIN_MOTOR_1			(14)
-#define	IO_PIN_MOTOR_2			(12)
-#define	IO_PIN_MOTOR_3			(13)
-#define	IO_PIN_MOTOR_4			(23)
-#define	IO_PIN_MOTOR_ENA		(16)
-#define	IO_PIN_MOTOR_ENB		(27)
-// Line Tracking Sensor Pin
-#define IO_PIN_LINETRACK_LEFT	(26)
-#define IO_PIN_LINETRACK_CENTER	(17)
-#define IO_PIN_LINETRACK_RIGHT	(39)
+//---------------------- PIN ----------------------
+// Motor
+#define IO_PIN_MOTOR_1          (14)
+#define IO_PIN_MOTOR_2          (12)
+#define IO_PIN_MOTOR_3          (13)
+#define IO_PIN_MOTOR_4          (23)
+#define IO_PIN_MOTOR_ENA        (16)
+#define IO_PIN_MOTOR_ENB        (27)
+// Line Tracking Sensor
+#define IO_PIN_LINETRACK_LEFT   (26)
+#define IO_PIN_LINETRACK_CENTER (17)
+#define IO_PIN_LINETRACK_RIGHT  (39)
 
-// Motor Speed
-#define	MOTOR_SPEED				(150)
+//---------------------- D/A converter channel ----------------------
+#define DAC_CH_MOTOR_A          (0)
+#define DAC_CH_MOTOR_B          (1)
+#define DAC_CH_SERVO            (2)
 
 //---------------------- Trafic Signal ----------------------
-#define	SIGNAL_COLOR_BLACK			(0)
-#define	SIGNAL_COLOR_BLUE			(1)
-#define	SIGNAL_COLOR_YELLOW			(2)
-#define	SIGNAL_COLOR_RED			(3)
+#define SIGNAL_COLOR_BLACK      (0)
+#define SIGNAL_COLOR_BLUE       (1)
+#define SIGNAL_COLOR_YELLOW     (2)
+#define SIGNAL_COLOR_RED        (3)
 
+//---------------------- RoboCar ----------------------
+// Motor derection
+#define MOTOR_DIR_STOP          (0)
+#define MOTOR_DIR_FWD           (1)
+#define MOTOR_DIR_REV           (2)
 
+//---------------------- State machine ----------------------
 // State Machine Event
 enum {
-	TRACK_EVENT_NONE = -1,
-	TRACK_EVENT_XXX	= 0,
-	TRACK_EVENT_XXO,
-	TRACK_EVENT_XOX,
-	TRACK_EVENT_XOO,
-	TRACK_EVENT_OXX,
-	TRACK_EVENT_OXO,
-	TRACK_EVENT_OOX,
-	TRACK_EVENT_OOO_RED,
-	TRACK_EVENT_OOO_BLUE,
+    TRACK_EVENT_NONE = -1,
+    TRACK_EVENT_XXX = 0,
+    TRACK_EVENT_XXO,
+    TRACK_EVENT_XOX,
+    TRACK_EVENT_XOO,
+    TRACK_EVENT_OXX,
+    TRACK_EVENT_OXO,
+    TRACK_EVENT_OOX,
+    TRACK_EVENT_OOO_RED,
+    TRACK_EVENT_OOO_BLUE,
 
-	TRACK_EVENT_NUM
+    TRACK_EVENT_NUM
 };
 
 // State Machine State
 enum {
-	STATE_ROTATO_LEFT=0,	
-	STATE_GO_FORWARD,	
-	STATE_ROTATO_RIGHT,	
-	STATE_STOP,	
+    STATE_ROTATO_LEFT=0,
+    STATE_GO_FORWARD,
+    STATE_ROTATO_RIGHT,
+    STATE_STOP,
 
-	STATE_NUM	
+    STATE_NUM
 };
 
-// 状態遷移テーブル
+// Table of state 
 int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
 //              Left                    Foward                  Right                   Stop
@@ -74,31 +83,46 @@ int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 };
 
 
-int g_cur_state;    // Current state
-int	g_trafic_signal_color = SIGNAL_COLOR_RED;
-int g_motor_speed = 150;
-
 BluetoothSerial SerialBT;
-Stream* g_pSerial=&Serial;
+
+int g_cur_state;    // Current state
+int g_trafic_signal_color = SIGNAL_COLOR_BLUE;
+int g_motor_speed = 200;
+
+Stream* g_pSerial=&SerialBT; // Selected serial port (USB is default)
 
 
-//=====================================
+//===================================================================
 // Command procedures
-//=====================================
-void    _cmd__serial(int argc, char* argv[])
+//===================================================================
+void _cmd__test(int argc, char* argv[])
+{
+    g_pSerial->println("Test OK.");
+}
+
+void _cmd__serial(int argc, char* argv[])
 {
     if(argc > 1) {
         if(strcmp(argv[1], "bt")==0) {
             g_pSerial = &SerialBT;
+            g_pSerial->println("Bluetooth was selected.");
         }
         else if(strcmp(argv[1], "usb")==0) {
             g_pSerial = &Serial;
+            g_pSerial->println("USB was selected.");
         }
     }
-        
 }
 
-void    _cmd__signal(int argc, char* argv[])
+void _cmd__speed(int argc, char* argv[])
+{
+    if(argc > 1) {
+        int speed = atoi(argv[1]);
+        g_motor_speed = speed;
+    }
+}
+
+void _cmd__signal(int argc, char* argv[])
 {
     if(argc > 1) {
         if(strcmp(argv[1], "r")==0) {
@@ -116,11 +140,13 @@ void    _cmd__signal(int argc, char* argv[])
     }
 }
 
-//=====================================
+//===================================================================
 // Command table
-//=====================================
+//===================================================================
 T_command_info  g_command_table[] = {
+    {"test",        _cmd__test},
     {"serial",      _cmd__serial},
+    {"speed",       _cmd__speed},
     {"signal",      _cmd__signal},
     // The last line must be NULL
     {NULL,          NULL},
@@ -128,110 +154,180 @@ T_command_info  g_command_table[] = {
 
 
 //===================================================================
-// MODULE   : read_sensor_*()
-// FUNCTION : センサーを読む(Left/Center/Right)
-// RETURN   : なし
+// MODULE   : read_sensor_L/C/R()
+// FUNCTION : Read photo sensor(Left/Center/Right)
+// RETURN   : N/A
 //===================================================================
 int read_sensor_L()
 {
-	return	!digitalRead(IO_PIN_LINETRACK_LEFT);
+    return !digitalRead(IO_PIN_LINETRACK_LEFT);
 }
 int read_sensor_C()
 {
-	return	!digitalRead(IO_PIN_LINETRACK_CENTER);
+    return !digitalRead(IO_PIN_LINETRACK_CENTER);
 }
 int read_sensor_R()
 {
-	return	!digitalRead(IO_PIN_LINETRACK_RIGHT);
+    return !digitalRead(IO_PIN_LINETRACK_RIGHT);
 }
 
 //===================================================================
-// MODULE   : forward()
-// FUNCTION : 直進
-// RETURN   : なし
+// MODULE   : MOTOR_init()
+// FUNCTION : Initialize motor setup
+// RETURN   : N/A
 //===================================================================
-void forward()
+void MOTOR_init()
 {
-	ledcWrite(0, g_motor_speed);  
-	ledcWrite(1, g_motor_speed);  
-	digitalWrite(IO_PIN_MOTOR_1, HIGH);
-	digitalWrite(IO_PIN_MOTOR_2, LOW);
-	digitalWrite(IO_PIN_MOTOR_3, LOW);
-	digitalWrite(IO_PIN_MOTOR_4, HIGH);
-	
-	g_cur_state = STATE_GO_FORWARD;
-	
-	g_pSerial->println("go forward!");
+    // Initialize I/O pin
+    pinMode(IO_PIN_MOTOR_1, OUTPUT);
+    pinMode(IO_PIN_MOTOR_2, OUTPUT);
+    pinMode(IO_PIN_MOTOR_3, OUTPUT);
+    pinMode(IO_PIN_MOTOR_4, OUTPUT);
+    pinMode(IO_PIN_MOTOR_ENA, OUTPUT);
+    pinMode(IO_PIN_MOTOR_ENB, OUTPUT);
+
+    // Assign the pins to D/A converter channels
+    ledcSetup(DAC_CH_MOTOR_A, 980, 8);
+    ledcSetup(DAC_CH_MOTOR_B, 980, 8);
+    ledcAttachPin(IO_PIN_MOTOR_ENA, DAC_CH_MOTOR_A);
+    ledcAttachPin(IO_PIN_MOTOR_ENB, DAC_CH_MOTOR_B);
 }
 
 //===================================================================
-// MODULE   : left()
-// FUNCTION : 左回転
-// RETURN   : なし
+// MODULE   : MOTOR_set_speed_left()/MOTOR_set_speed_right()
+// FUNCTION : set left/right motor speed
+// RETURN   : N/A
 //===================================================================
-void left()
+void MOTOR_set_speed_left(int dir, int speed)
 {
-	ledcWrite(0, g_motor_speed);  
-	ledcWrite(1, g_motor_speed);  
-	digitalWrite(IO_PIN_MOTOR_1, LOW);
-	digitalWrite(IO_PIN_MOTOR_2, HIGH);
-	digitalWrite(IO_PIN_MOTOR_3, LOW);
-	digitalWrite(IO_PIN_MOTOR_4, HIGH);
+    ledcWrite(DAC_CH_MOTOR_A, speed);  
 
-	g_cur_state = STATE_ROTATO_LEFT;
+    if(dir == MOTOR_DIR_FWD) {
+        digitalWrite(IO_PIN_MOTOR_1,HIGH);
+        digitalWrite(IO_PIN_MOTOR_2,LOW);
+    }
+    else if(dir == MOTOR_DIR_REV) {
+        digitalWrite(IO_PIN_MOTOR_1,LOW);
+        digitalWrite(IO_PIN_MOTOR_2,HIGH);
+    }
+}
 
-	g_pSerial->println("go left!");
+void MOTOR_set_speed_right(int dir, int speed)
+{
+    ledcWrite(DAC_CH_MOTOR_B, speed);  
+
+    if(dir == MOTOR_DIR_FWD) {
+        digitalWrite(IO_PIN_MOTOR_3,LOW);
+        digitalWrite(IO_PIN_MOTOR_4,HIGH);
+    }
+    else if(dir == MOTOR_DIR_REV) {
+        digitalWrite(IO_PIN_MOTOR_3,HIGH);
+        digitalWrite(IO_PIN_MOTOR_4,LOW);
+    }
 }
 
 //===================================================================
-// MODULE   : right()
-// FUNCTION : 右回転
-// RETURN   : なし
+// MODULE   : RoboCar_move_forward()/RoboCar_move_backward()
+// FUNCTION : Go forward/backward
+// RETURN   : N/A
 //===================================================================
-void right()
+void RoboCar_move_forward(int speed)
 {
-	ledcWrite(0, g_motor_speed);  
-	ledcWrite(1, g_motor_speed);  
-	digitalWrite(IO_PIN_MOTOR_1, HIGH);
-	digitalWrite(IO_PIN_MOTOR_2, LOW);
-	digitalWrite(IO_PIN_MOTOR_3, HIGH);
-	digitalWrite(IO_PIN_MOTOR_4, LOW); 
+    MOTOR_set_speed_right(MOTOR_DIR_FWD, speed);
+    MOTOR_set_speed_left(MOTOR_DIR_FWD, speed);
+    
+    g_cur_state = STATE_GO_FORWARD;
+}
 
-	g_cur_state = STATE_ROTATO_RIGHT;
-
-	g_pSerial->println("go right!");
-} 
-
-//===================================================================
-// MODULE   : stop()
-// FUNCTION : 停止
-// RETURN   : なし
-//===================================================================
-void stop()
+void RoboCar_move_backward(int speed)
 {
-	ledcWrite(0, 0);  
-	ledcWrite(1, 0);  
+    MOTOR_set_speed_right(MOTOR_DIR_REV, speed);
+    MOTOR_set_speed_left(MOTOR_DIR_REV, speed);
+}
 
-	g_cur_state = STATE_STOP;
+//===================================================================
+// MODULE   : RoboCar_turn_left()/RoboCar_turn_right()
+// FUNCTION : Curve to the left/right
+// RETURN   : N/A
+//===================================================================
+void RoboCar_turn_left(int dir, int speed, int level)
+{
+    if(level < 0) {
+        level = 0;
+    }
+    int speed_right = speed;
+    int speed_left = speed - level;
+    if(speed_left < 0) {
+        speed_left = 0;
+    }
+        
+    MOTOR_set_speed_right(dir, speed_right);
+    MOTOR_set_speed_left(dir, speed_left);
+}
 
-	g_pSerial->println("Stop!");
-} 
+void RoboCar_turn_right(int dir, int speed, int level)
+{
+    if(level < 0) {
+        level = 0;
+    }
+    int speed_right = speed - level;
+    int speed_left = speed;
+    if(speed_right < 0) {
+        speed_right = 0;
+    }
+    MOTOR_set_speed_right(dir, speed_right);
+    MOTOR_set_speed_left(dir, speed_left);
+}
+
+//===================================================================
+// MODULE   : RoboCar_rotate_left()/RoboCar_rotate_right()
+// FUNCTION : Rotate to the left/right
+// RETURN   : N/A
+//===================================================================
+void RoboCar_rotate_left(int speed)
+{
+    MOTOR_set_speed_right(MOTOR_DIR_FWD, speed);
+    MOTOR_set_speed_left(MOTOR_DIR_REV, speed);
+
+    g_cur_state = STATE_ROTATO_LEFT;
+}
+
+void RoboCar_rotate_right(int speed)
+{
+    MOTOR_set_speed_right(MOTOR_DIR_REV, speed);
+    MOTOR_set_speed_left(MOTOR_DIR_FWD, speed);
+
+    g_cur_state = STATE_ROTATO_RIGHT;
+}
+
+//===================================================================
+// MODULE   : RoboCar_stop()
+// FUNCTION : Stop
+// RETURN   : N/A
+//===================================================================
+void RoboCar_stop()
+{
+    MOTOR_set_speed_left(0, 0);
+    MOTOR_set_speed_right(0, 0);
+
+    g_cur_state = STATE_STOP;
+}
 
 //===================================================================
 // MODULE   : create_event()
-// FUNCTION : State Machineの入力Event生成
-// RETURN   : Event
+// FUNCTION : Create event ID for the state machine
+// RETURN   : Event ID
 //===================================================================
 int create_event()
 {
     // Get tracking sensor value
-	int sensor_L = read_sensor_L();
-	int sensor_C = read_sensor_C();
-	int sensor_R = read_sensor_R();
-	int sensor = ((sensor_L&0x1)<<2) | ((sensor_C&0x1)<<1) | ((sensor_R&0x1)<<0);
-	
-	int event;
-	if(sensor == 7) { // "OOO"
+    int sensor_L = read_sensor_L();
+    int sensor_C = read_sensor_C();
+    int sensor_R = read_sensor_R();
+    int sensor = ((sensor_L&0x1)<<2) | ((sensor_C&0x1)<<1) | ((sensor_R&0x1)<<0);
+    
+    int event;
+    if(sensor == 7) { // "OOO"
         if(g_trafic_signal_color == SIGNAL_COLOR_BLUE) {
             event = TRACK_EVENT_OOO_BLUE;
         }
@@ -242,66 +338,68 @@ int create_event()
     else { // except for "OOO"
         event = sensor;
     }
-	
-	return	event;
+    
+    return event;
 }
 
 //===================================================================
 // MODULE   : get_next_state()
-// FUNCTION : State Machineのeventに対する遷移後の状態を取得
+// FUNCTION : Get next state of the state machine
 // RETURN   : Next State
 //===================================================================
 int get_next_state(int cur_state, int event) 
 {
-	if((event < 0) || (TRACK_EVENT_NUM <= event)) {
-		// Invalid event ID
-		return	g_cur_state;
-	}
-	
-	if((cur_state < 0) || (STATE_NUM <= cur_state)) {
-		// Invalid state ID
-		return	g_cur_state;
-	}
-	
-	return	g_next_state_table[event][cur_state];
+    if((event < 0) || (TRACK_EVENT_NUM <= event)) { // Invalid event ID
+        return g_cur_state;
+    }
+    
+    if((cur_state < 0) || (STATE_NUM <= cur_state)) { // Invalid state ID
+        return g_cur_state;
+    }
+    
+    return g_next_state_table[event][cur_state];
 }
 
 //===================================================================
 // MODULE   : Task_line_trace()
-// FUNCTION : [Task] ライントレースカー制御
-// RETURN   : なし
+// FUNCTION : [Task] Control RoboCar for line tracking
+// RETURN   : N/A
 //===================================================================
 void Task_line_trace(void* param)
 {
-	for(;;) {
-		vTaskDelay(10);
+    for(;;) {
+        vTaskDelay(10);
 
-		// Create event
-		int event = create_event();
-		if(event != -1) { // if event occurs
-			// Get next state
-			int next_state = get_next_state(g_cur_state, event);
-			
-			if(next_state != g_cur_state) { // Next state is different from current state => State transition occurs
-				// Process accoring to state
-				if(next_state == STATE_ROTATO_LEFT) {
-					left();
-				}
-				else if(next_state == STATE_GO_FORWARD) {
-					forward();
-				}
-				else if(next_state == STATE_ROTATO_RIGHT) {
-					right();
-				}
-				else if(next_state == STATE_STOP) {
-					stop();
-				}
-			}
-		}
-	}
-	
+        // Create event
+        int event = create_event();
+        if(event != -1) { // if event occurs
+            // Get next state
+            int next_state = get_next_state(g_cur_state, event);
+            
+            if(next_state != g_cur_state) { // Next state is different from current state => State transition occurs
+                // Process accoring to state
+                if(next_state == STATE_ROTATO_LEFT) {
+                    RoboCar_rotate_left(g_motor_speed);
+                }
+                else if(next_state == STATE_GO_FORWARD) {
+                    RoboCar_move_forward(g_motor_speed);
+                }
+                else if(next_state == STATE_ROTATO_RIGHT) {
+                    RoboCar_rotate_right(g_motor_speed);
+                }
+                else if(next_state == STATE_STOP) {
+                    RoboCar_stop();
+                }
+            }
+        }
+    }
 }
 
+//===================================================================
+// MODULE   : Task_serial_cmd()
+// FUNCTION : [Task] Parse and execute command from serial port
+// RETURN   : N/A
+//===================================================================
 void Task_serial_cmd(void* param)
 {
     char    command_line[256];
@@ -321,53 +419,44 @@ void Task_serial_cmd(void* param)
                 parse_and_exec_cmd(command_line, g_command_table);
             }
         }
-        
     }
-    
 }
-
 
 //===================================================================
 // MODULE   : setup()
-// FUNCTION : 初期設定
-// RETURN   : なし
+// FUNCTION : Initialization
+// RETURN   : N/A
 //===================================================================
 void setup()
 {
-	// Serial通信の初期化
-	Serial.begin(115200);
-	
-	// I/O Pin属性設定
+    // Initialize USB serial
+    Serial.begin(115200);
+    // Initialize Bluetooth serial
+    SerialBT.begin("ESP32-xxxxx");
+
+    // Initialize motor
+    MOTOR_init();
+
+    // Initialize line tracking sensor pin
 	pinMode(IO_PIN_LINETRACK_LEFT, INPUT);
 	pinMode(IO_PIN_LINETRACK_CENTER, INPUT);
 	pinMode(IO_PIN_LINETRACK_RIGHT, INPUT);
-	pinMode(IO_PIN_MOTOR_ENA, OUTPUT);
-	pinMode(IO_PIN_MOTOR_ENB, OUTPUT);
-	pinMode(IO_PIN_MOTOR_1, OUTPUT);
-	pinMode(IO_PIN_MOTOR_2, OUTPUT);
-	pinMode(IO_PIN_MOTOR_3, OUTPUT);
-	pinMode(IO_PIN_MOTOR_4, OUTPUT);
 
-	// DAC
-	ledcSetup(0, 980, 8);
-	ledcSetup(1, 980, 8);
-	ledcAttachPin(IO_PIN_MOTOR_ENA, 0);
-	ledcAttachPin(IO_PIN_MOTOR_ENB, 1);
-
-	xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
-	xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 2048, NULL, 1, NULL, 0);
-	
-	// 最初は直進
-	forward();
+    // Create FreeRTOS tasks
+    xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 2048, NULL, 1, NULL, 0);
+    
+    // Go forward
+    RoboCar_stop();
 }
 
 //===================================================================
 // MODULE   : loop()
-// FUNCTION : メインループ
-// RETURN   : なし
+// FUNCTION : main loop
+// RETURN   : N/A
 //===================================================================
 void loop() 
 {
-	// 処理は全てTaskで行うのでメインループ内では何もしない
+    // All proccess should be executed in FreeRTOS tasks.
 }
 
