@@ -25,11 +25,6 @@ void    _cmd__add(int argc, char* argv[])
     }
 }
 
-void    _cmd__right(int argc, char* argv[])
-{
-    g_pSerial->println("Right turn");
-}
-
 void    _cmd__serial(int argc, char* argv[])
 {
     if(argc > 1) {
