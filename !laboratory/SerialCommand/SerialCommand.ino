@@ -11,7 +11,12 @@ int     g_cmd_index = 0;
 //=====================================
 // Command procedures
 //=====================================
-void    _cmd__add(int argc, char* argv[])
+void _cmd__test(int argc, char* argv[])
+{
+    g_pSerial->println("Test OK.");
+}
+
+void _cmd__add(int argc, char* argv[])
 {
     if(argc > 2) {
         int val1 = atoi(argv[1]);
@@ -25,7 +30,7 @@ void    _cmd__add(int argc, char* argv[])
     }
 }
 
-void    _cmd__serial(int argc, char* argv[])
+void _cmd__serial(int argc, char* argv[])
 {
     if(argc > 1) {
         if(strcmp(argv[1], "bt")==0) {
@@ -57,6 +62,7 @@ void    _cmd__signal(int argc, char* argv[])
 // Command table
 //=====================================
 T_command_info  g_command_table[] = {
+    {"test",        _cmd__test},
     {"add",         _cmd__add},
     {"serial",      _cmd__serial},
     {"signal",      _cmd__signal},
