@@ -86,10 +86,12 @@ int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 BluetoothSerial SerialBT;
 
 int g_cur_state;    // Current state
-int g_trafic_signal_color = SIGNAL_COLOR_BLUE;
+int g_trafic_signal_color = SIGNAL_COLOR_RED;
 int g_motor_speed = 200;
 
 Stream* g_pSerial=&SerialBT; // Selected serial port (USB is default)
+
+SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
 
 
 //===================================================================
@@ -125,6 +127,7 @@ void _cmd__speed(int argc, char* argv[])
 void _cmd__signal(int argc, char* argv[])
 {
     if(argc > 1) {
+        int color = SIGNAL_COLOR_BLACK;
         if(strcmp(argv[1], "r")==0) {
             g_trafic_signal_color = SIGNAL_COLOR_RED;
             g_pSerial->println("Red");
@@ -136,6 +139,14 @@ void _cmd__signal(int argc, char* argv[])
         else if(strcmp(argv[1], "b")==0) {
             g_trafic_signal_color = SIGNAL_COLOR_BLUE;
             g_pSerial->println("Blue");
+        }
+        
+        if(color != SIGNAL_COLOR_BLACK) {
+            xSemaphoreTake(g_xMutex_Signal, portMAX_DELAY);
+            // Å•Å•Å• Start critical section Å•Å•Å•
+            g_trafic_signal_color = color;
+            // Å£Å£Å£ End critical section Å£Å£Å£
+            xSemaphoreGive(g_xMutex_Signal);
         }
     }
 }
@@ -320,6 +331,19 @@ void RoboCar_stop()
 //===================================================================
 int create_event()
 {
+    static int is_first = 1;
+    static int pre_signal_color;
+
+    xSemaphoreTake(g_xMutex_Signal, portMAX_DELAY);
+    // Å•Å•Å• Start critical section Å•Å•Å•
+    int signal_color = g_trafic_signal_color;
+    // Å£Å£Å£ End critical section Å£Å£Å£
+    xSemaphoreGive(g_xMutex_Signal);
+    if(is_first) {
+        pre_signal_color = signal_color;
+        is_first = 0;
+    }
+
     // Get tracking sensor value
     int sensor_L = read_sensor_L();
     int sensor_C = read_sensor_C();
@@ -328,7 +352,7 @@ int create_event()
     
     int event;
     if(sensor == 7) { // "OOO"
-        if(g_trafic_signal_color == SIGNAL_COLOR_BLUE) {
+        if(signal_color == SIGNAL_COLOR_BLUE) {
             event = TRACK_EVENT_OOO_BLUE;
         }
         else {
@@ -367,12 +391,13 @@ int get_next_state(int cur_state, int event)
 //===================================================================
 void Task_line_trace(void* param)
 {
+	xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(10);
 
         // Create event
         int event = create_event();
-        if(event != -1) { // if event occurs
+        if(event != TRACK_EVENT_NONE) { // if event occurs
             // Get next state
             int next_state = get_next_state(g_cur_state, event);
             
@@ -404,6 +429,8 @@ void Task_serial_cmd(void* param)
 {
     char    command_line[256];
     int     cmd_index = 0;
+
+	xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(10);
 
@@ -446,6 +473,9 @@ void setup()
     xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 2048, NULL, 1, NULL, 0);
     
+    // Create semaphore
+	g_xMutex_Signal = xSemaphoreCreateMutex();
+
     // Go forward
     RoboCar_stop();
 }
