@@ -69,6 +69,19 @@ enum {
     STATE_NUM
 };
 
+// RoboCar control status
+enum {
+    RC_CTRL_MOVE_FORWARD = 0,
+    RC_CTRL_TURN_FWD_LEFT,
+    RC_CTRL_TURN_FWD_RIGHT,
+    RC_CTRL_MOVE_BACKWARD,
+    RC_CTRL_TURN_BACK_LEFT,
+    RC_CTRL_TURN_BACK_RIGHT,
+    RC_CTRL_ROTATE_LEFT,
+    RC_CTRL_ROTATE_RIGHT,
+    RC_CTRL_STOP
+}
+
 // Table of state 
 int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
@@ -94,6 +107,7 @@ int g_robocar_speed_fwd = 200;
 int g_robocar_speed_back = 200;
 int g_robocar_speed_rotate = 200;
 int g_robocar_speed_turn = 200;
+int g_lr_level = 40;
 
 Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
 
@@ -150,7 +164,10 @@ void _cmd__speed(int argc, char* argv[])
 {
     if(argc > 1) {
         int speed = atoi(argv[1]);
-        g_motor_speed = speed;
+        RoboCar_set_speed_fwd(speed);
+        RoboCar_set_speed_back(speed);
+        RoboCar_set_speed_turn(speed);
+        RoboCar_set_speed_rotate(speed);
     }
 }
 
@@ -159,15 +176,15 @@ void _cmd__signal(int argc, char* argv[])
     if(argc > 1) {
         int color = SIGNAL_COLOR_BLACK;
         if(strcmp(argv[1], "r")==0) {
-            g_trafic_signal_color = SIGNAL_COLOR_RED;
+            color = SIGNAL_COLOR_RED;
             g_pSerial->println("Red");
         }
         else if(strcmp(argv[1], "y")==0) {
-            g_trafic_signal_color = SIGNAL_COLOR_YELLOW;
+            color = SIGNAL_COLOR_YELLOW;
             g_pSerial->println("Yellow");
         }
         else if(strcmp(argv[1], "b")==0) {
-            g_trafic_signal_color = SIGNAL_COLOR_BLUE;
+            color = SIGNAL_COLOR_BLUE;
             g_pSerial->println("Blue");
         }
         
@@ -288,103 +305,142 @@ void RoboCar_set_motor_speed(int speed_l, int speed_r)
 }
 
 //===================================================================
-// MODULE   : RoboCar_move_forward()/RoboCar_move_backward()
-// FUNCTION : Go forward/backward
+// FUNCTION : Control behavior of the RoboCar
 // RETURN   : N/A
 //===================================================================
-void RoboCar_move_forward(int speed)
+void RoboCar_move_forward()
 {
-    // Speed
-    int motor_power = min_max_hold(speed, 0, 255);
-    MOTOR_set_power_left(motor_power);
-    MOTOR_set_power_right(motor_power);
-    // Direction
-    MOTOR_set_dir_left(MOTOR_DIR_FWD);
-    MOTOR_set_dir_right(MOTOR_DIR_FWD);
+    g_robocar_control_state = RC_CTRL_MOVE_FORWARD;
+    RoboCar_control();
 }
-void RoboCar_move_backward(int speed)
+void RoboCar_move_backward()
 {
-    // Speed
-    int motor_power = min_max_hold(speed, 0, 255);
-    MOTOR_set_power_left(motor_power);
-    MOTOR_set_power_right(motor_power);
-    // Direction
-    MOTOR_set_dir_left(MOTOR_DIR_REV);
-    MOTOR_set_dir_right(MOTOR_DIR_REV);
+    g_robocar_control_state = RC_CTRL_MOVE_BACKWARD;
+    RoboCar_control();
 }
-
-//===================================================================
-// MODULE   : RoboCar_turn_left()/RoboCar_turn_right()
-// FUNCTION : Curve to the left/right
-// RETURN   : N/A
-//===================================================================
-void RoboCar_turn_left(int dir, int speed, int level)
+void RoboCar_turn_fwd_left()
 {
-    if(level < 0) {
-        level = 0;
-    }
-    int power_left = min_max_hold(speed-level, 0, 255);
-    int power_right = min_max_hold(speed, 0, 255);
-        
-    // Speed
-    MOTOR_set_power_left(power_left);
-    MOTOR_set_power_right(power_right);
-    // Direction
-    MOTOR_set_dir_left(dir);
-    MOTOR_set_dir_right(dir);
+    g_robocar_control_state = RC_CTRL_TURN_FWD_LEFT;
+    RoboCar_control();
 }
-void RoboCar_turn_right(int dir, int speed, int level)
+void RoboCar_turn_back_left()
 {
-    if(level < 0) {
-        level = 0;
-    }
-    int power_right = min_max_hold(speed-level, 0, 255);
-    int power_left = min_max_hold(speed, 0, 255);
-
-    // Speed
-    MOTOR_set_power_left(power_left);
-    MOTOR_set_power_right(power_right);
-    // Direction
-    MOTOR_set_dir_left(dir);
-    MOTOR_set_dir_right(dir);
+    g_robocar_control_state = RC_CTRL_TURN_BACK_LEFT;
+    RoboCar_control();
 }
-
-//===================================================================
-// MODULE   : RoboCar_rotate_left()/RoboCar_rotate_right()
-// FUNCTION : Rotate to the left/right
-// RETURN   : N/A
-//===================================================================
-void RoboCar_rotate_left(int speed)
+void RoboCar_turn_fwd_right()
 {
-    // Speed
-    int motor_power = min_max_hold(speed, 0, 255);
-    MOTOR_set_power_left(motor_power);
-    MOTOR_set_power_right(motor_power);
-    // Direction
-    MOTOR_set_dir_left(MOTOR_DIR_REV);
-    MOTOR_set_dir_right(MOTOR_DIR_FWD);
+    g_robocar_control_state = RC_CTRL_TURN_FWD_RIGHT;
+    RoboCar_control();
 }
-void RoboCar_rotate_right(int speed)
+void RoboCar_turn_back_right()
 {
-    // Speed
-    int motor_power = min_max_hold(speed, 0, 255);
-    MOTOR_set_power_left(motor_power);
-    MOTOR_set_power_right(motor_power);
-    // Direction
-    MOTOR_set_dir_left(MOTOR_DIR_FWD);
-    MOTOR_set_dir_right(MOTOR_DIR_REV);
+    g_robocar_control_state = RC_CTRL_TURN_BACK_RIGHT;
+    RoboCar_control();
 }
-
-//===================================================================
-// MODULE   : RoboCar_stop()
-// FUNCTION : Stop
-// RETURN   : N/A
-//===================================================================
+void RoboCar_rotate_left()
+{
+    g_robocar_control_state = RC_CTRL_ROTATE_LEFT;
+    RoboCar_control();
+}
+void RoboCar_rotate_right()
+{
+    g_robocar_control_state = RC_CTRL_ROTATE_RIGHT;
+    RoboCar_control();
+}
 void RoboCar_stop()
 {
+    g_robocar_control_state = RC_CTRL_STOP;
+    RoboCar_control();
+}
+
+//===================================================================
+// FUNCTION : Set speed of the RoboCar
+// RETURN   : N/A
+//===================================================================
+void RoboCar_set_speed_fwd(int speed)
+{
+    g_robocar_speed_fwd = min_max_hold(speed, 0, 255);
+    RoboCar_control();
+}
+void RoboCar_set_speed_back(int speed)
+{
+    g_robocar_speed_back = min_max_hold(speed, 0, 255);
+    RoboCar_control();
+}
+void RoboCar_set_speed_turn(int speed)
+{
+    g_robocar_speed_turn = min_max_hold(speed, 0, 255);
+    RoboCar_control();
+}
+void RoboCar_set_speed_rotate(int min_max_hold(speed, 0, 255))
+{
+    g_robocar_speed_rotate = min_max_hold(speed, 0, 255);
+    RoboCar_control();
+}
+
+//===================================================================
+// MODULE   : RoboCar_control()
+// FUNCTION : Control speed and direction of the RoboCar.
+// RETURN   : N/A
+//===================================================================
+void RoboCar_control()
+{
     // Speed
-    MOTOR_set_power_left(0);
-    MOTOR_set_power_right(0);
+    switch(g_robocar_state) {
+        case RC_CTRL_MOVE_FORWARD:
+            MOTOR_set_power_left(g_robocar_speed_fwd);
+            MOTOR_set_power_right(g_robocar_speed_fwd);
+            break;
+        case RC_CTRL_MOVE_BACKWARD:
+            MOTOR_set_power_left(g_robocar_speed_back);
+            MOTOR_set_power_right(g_robocar_speed_back);
+            break;
+        case RC_CTRL_TURN_FWD_LEFT:
+        case RC_CTRL_TURN_BACK_LEFT:
+            MOTOR_set_power_left(g_robocar_speed_turn-g_lr_level);
+            MOTOR_set_power_right(g_robocar_speed_turn);
+            break;
+        case RC_CTRL_TURN_FWD_RIGHT:
+        case RC_CTRL_TURN_BACK_RIGHT:
+            MOTOR_set_power_left(g_robocar_speed_turn);
+            MOTOR_set_power_right(g_robocar_speed_turn-g_lr_level);
+            break;
+        case RC_CTRL_ROTATE_LEFT:
+        case RC_CTRL_ROTATE_RIGHT:
+            MOTOR_set_power_left(g_robocar_speed_rotate);
+            MOTOR_set_power_right(g_robocar_speed_rotate);
+            break;
+        case RC_CTRL_STOP:
+            MOTOR_set_power_left(0);
+            MOTOR_set_power_right(0);
+            break;
+    }
+
+    // Direction
+    switch(g_robocar_state) {
+        case RC_CTRL_MOVE_FORWARD:
+        case RC_CTRL_TURN_FWD_LEFT:
+        case RC_CTRL_TURN_FWD_RIGHT:
+        case RC_CTRL_STOP:
+            MOTOR_set_dir_left(MOTOR_DIR_FWD);
+            MOTOR_set_dir_right(MOTOR_DIR_FWD);
+            break;
+        case RC_CTRL_MOVE_BACKWARD:
+        case RC_CTRL_TURN_BACK_LEFT:
+        case RC_CTRL_TURN_BACK_RIGHT:
+            MOTOR_set_dir_left(MOTOR_DIR_REV);
+            MOTOR_set_dir_right(MOTOR_DIR_REV);
+            break;
+        case RC_CTRL_ROTATE_LEFT:
+            MOTOR_set_dir_left(MOTOR_DIR_REV);
+            MOTOR_set_dir_right(MOTOR_DIR_FWD);
+            break;
+        case RC_CTRL_ROTATE_RIGHT:
+            MOTOR_set_dir_left(MOTOR_DIR_FWD);
+            MOTOR_set_dir_right(MOTOR_DIR_REV);
+            break;
+    }
 }
 
 //===================================================================
@@ -461,27 +517,47 @@ void Task_line_trace(void* param)
     for(;;) {
         vTaskDelay(10);
 
-        // Create event
-        int event = create_event();
-        if(event != TRACK_EVENT_NONE) { // if event occurs
-            // Get next state
-            int next_state = get_next_state(g_cur_state, event);
-            
-            if(next_state != g_cur_state) { // Next state is different from current state => State transition occurs
+        //-------------------------
+        // 1st state machine
+        //-------------------------
+        int event_1 = create_event_1(); // Create event
+        if(event_1 != TRACK_EVENT_1_NONE) { // if event occurs
+            int next_state_1 = get_next_state_1(g_cur_state_1, event_1); // Get next state
+            if(next_state_1 != g_cur_state_1) { // Next state is different from current state => State transition occurs
                 // Process accoring to state
-                if(next_state == STATE_ROTATO_LEFT) {
-                    RoboCar_rotate_left(g_robocar_speed_rotate);
+                if(next_state_1 == STATE_1_RUN) {
+                    g_cur_state_2 = STATE_2_FWD;
                 }
-                else if(next_state == STATE_GO_FORWARD) {
-                    RoboCar_move_forward(g_robocar_speed_fwd);
-                }
-                else if(next_state == STATE_ROTATO_RIGHT) {
-                    RoboCar_rotate_right(g_robocar_speed_rotate);
-                }
-                else if(next_state == STATE_STOP) {
+                else if(next_state_1 == STATE_1_WAIT) {
                     RoboCar_stop();
                 }
-                g_cur_state = next_state;
+                else if(next_state_1 == STATE_1_STOP) {
+                    RoboCar_stop();
+                }
+                g_cur_state_1 = next_state_1;
+            }
+        }
+
+        //-------------------------
+        // 2nd state machine
+        //-------------------------
+        if(g_cur_state_1 == STATE_1_RUN) {
+            int event_2 = create_event_2(); // Create event
+            if(event_2 != TRACK_EVENT_2_NONE) { // if event occurs
+                int next_state_2 = get_next_state_2(g_cur_state_2, event_2); // Get next state
+                if(next_state_2 != g_cur_state_2) { // Next state is different from current state => State transition occurs
+                    // Process accoring to state
+                    if(next_state_2 == STATE_2_LEFT) {
+                        RoboCar_rotate_left();
+                    }
+                    else if(next_state_2 == STATE_2_FWD) {
+                        RoboCar_move_forward();
+                    }
+                    else if(next_state_2 == STATE_2_RIGHT) {
+                        RoboCar_rotate_right();
+                    }
+                    g_cur_state_2 = next_state_2;
+                }
             }
         }
     }
