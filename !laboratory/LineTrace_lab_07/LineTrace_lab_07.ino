@@ -80,7 +80,7 @@ enum {
     RC_CTRL_ROTATE_LEFT,
     RC_CTRL_ROTATE_RIGHT,
     RC_CTRL_STOP
-}
+};
 
 // Table of state 
 int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
@@ -103,6 +103,7 @@ BluetoothSerial SerialBT;
 int g_cur_state;    // Current state
 int g_trafic_signal_color = SIGNAL_COLOR_RED;
 
+int g_robocar_control_state;
 int g_robocar_speed_fwd = 200;
 int g_robocar_speed_back = 200;
 int g_robocar_speed_rotate = 200;
@@ -293,17 +294,6 @@ void MOTOR_set_dir_right(int dir)
     }
 }
 
-void RoboCar_set_motor_speed(int speed_l, int speed_r)
-{
-    // max/min hold
-    g_robocar_speed_l = min_max_hold(speed_l, 0, 255);
-    g_robocar_speed_r = min_max_hold(speed_r, 0, 255);
-    
-    // Motor power    
-    MOTOR_set_power_left(g_robocar_speed_l);
-    MOTOR_set_power_right(g_robocar_speed_r);    
-}
-
 //===================================================================
 // FUNCTION : Control behavior of the RoboCar
 // RETURN   : N/A
@@ -373,7 +363,7 @@ void RoboCar_set_speed_turn(int speed)
     g_robocar_speed_turn = min_max_hold(speed, 0, 255);
     RoboCar_control();
 }
-void RoboCar_set_speed_rotate(int min_max_hold(speed, 0, 255))
+void RoboCar_set_speed_rotate(int speed)
 {
     g_robocar_speed_rotate = min_max_hold(speed, 0, 255);
     RoboCar_control();
@@ -387,7 +377,7 @@ void RoboCar_set_speed_rotate(int min_max_hold(speed, 0, 255))
 void RoboCar_control()
 {
     // Speed
-    switch(g_robocar_state) {
+    switch(g_robocar_control_state) {
         case RC_CTRL_MOVE_FORWARD:
             MOTOR_set_power_left(g_robocar_speed_fwd);
             MOTOR_set_power_right(g_robocar_speed_fwd);
@@ -418,7 +408,7 @@ void RoboCar_control()
     }
 
     // Direction
-    switch(g_robocar_state) {
+    switch(g_robocar_control_state) {
         case RC_CTRL_MOVE_FORWARD:
         case RC_CTRL_TURN_FWD_LEFT:
         case RC_CTRL_TURN_FWD_RIGHT:
@@ -517,51 +507,30 @@ void Task_line_trace(void* param)
     for(;;) {
         vTaskDelay(10);
 
-        //-------------------------
-        // 1st state machine
-        //-------------------------
-        int event_1 = create_event_1(); // Create event
-        if(event_1 != TRACK_EVENT_1_NONE) { // if event occurs
-            int next_state_1 = get_next_state_1(g_cur_state_1, event_1); // Get next state
-            if(next_state_1 != g_cur_state_1) { // Next state is different from current state => State transition occurs
+        // Create event
+        int event = create_event();
+        if(event != TRACK_EVENT_NONE) { // if event occurs
+            // Get next state
+            int next_state = get_next_state(g_cur_state, event);
+            
+            if(next_state != g_cur_state) { // Next state is different from current state => State transition occurs
                 // Process accoring to state
-                if(next_state_1 == STATE_1_RUN) {
-                    g_cur_state_2 = STATE_2_FWD;
+                if(next_state == STATE_ROTATO_LEFT) {
+                    RoboCar_rotate_left();
                 }
-                else if(next_state_1 == STATE_1_WAIT) {
+                else if(next_state == STATE_GO_FORWARD) {
+                    RoboCar_move_forward();
+                }
+                else if(next_state == STATE_ROTATO_RIGHT) {
+                    RoboCar_rotate_right();
+                }
+                else if(next_state == STATE_STOP) {
                     RoboCar_stop();
                 }
-                else if(next_state_1 == STATE_1_STOP) {
-                    RoboCar_stop();
-                }
-                g_cur_state_1 = next_state_1;
+                g_cur_state = next_state;
             }
         }
-
-        //-------------------------
-        // 2nd state machine
-        //-------------------------
-        if(g_cur_state_1 == STATE_1_RUN) {
-            int event_2 = create_event_2(); // Create event
-            if(event_2 != TRACK_EVENT_2_NONE) { // if event occurs
-                int next_state_2 = get_next_state_2(g_cur_state_2, event_2); // Get next state
-                if(next_state_2 != g_cur_state_2) { // Next state is different from current state => State transition occurs
-                    // Process accoring to state
-                    if(next_state_2 == STATE_2_LEFT) {
-                        RoboCar_rotate_left();
-                    }
-                    else if(next_state_2 == STATE_2_FWD) {
-                        RoboCar_move_forward();
-                    }
-                    else if(next_state_2 == STATE_2_RIGHT) {
-                        RoboCar_rotate_right();
-                    }
-                    g_cur_state_2 = next_state_2;
-                }
-            }
-        }
-    }
-}
+    }}
 
 //===================================================================
 // MODULE   : Task_serial_cmd()
@@ -593,6 +562,40 @@ void Task_serial_cmd(void* param)
 }
 
 //===================================================================
+// MODULE   : Task_sensor()
+// FUNCTION : [Task] get sensor data
+// RETURN   : N/A
+//===================================================================
+void Task_sensor(void* param)
+{
+	xSemaphoreGive(g_xMutex_Signal);
+    for(;;) {
+        vTaskDelay(1000);
+
+        // All proccess should be executed in FreeRTOS tasks.
+    	int error;
+    	unsigned short ps_val;
+    	float als_val;
+
+    	error = rpr0521rs.get_psalsval(&ps_val, &als_val);
+    	if(error == 0) {
+    		// Proximity
+    		g_pSerial->print("Prox. = ");
+    		g_pSerial->print(ps_val);
+    		g_pSerial->print("\t||\t");
+    		// Brightness
+    		g_pSerial->print("Bright. = ");
+    		g_pSerial->print(als_val);
+
+    		g_pSerial->println();
+    	}
+    	else {
+    		g_pSerial->println("[Error] cannot get sensor data.");
+    	}
+    }
+}
+
+//===================================================================
 // MODULE   : setup()
 // FUNCTION : Initialization
 // RETURN   : N/A
@@ -620,6 +623,7 @@ void setup()
     // Create FreeRTOS tasks
     xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 2048, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(Task_serial_cmd, "Task_sensor", 2048, NULL, 3, NULL, 0);
     
     // Create semaphore
 	g_xMutex_Signal = xSemaphoreCreateMutex();
@@ -635,27 +639,5 @@ void setup()
 //===================================================================
 void loop() 
 {
-    // All proccess should be executed in FreeRTOS tasks.
-	int error;
-	unsigned short ps_val;
-	float als_val;
-
-	error = rpr0521rs.get_psalsval(&ps_val, &als_val);
-	if(error == 0) {
-		// 近接センサー
-		Serial.print("Prox. = ");
-		Serial.print(ps_val);
-		Serial.print("\t||\t");
-		// 照度センサー
-		Serial.print("Bright. = ");
-		Serial.print(als_val);
-
-		Serial.println();
-	}
-	else {
-		Serial.println("[Error] cannot get sensor data.");
-	}
-
-	delay(1000);
 }
 
