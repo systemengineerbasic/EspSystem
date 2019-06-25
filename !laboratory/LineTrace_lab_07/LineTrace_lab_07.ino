@@ -69,19 +69,6 @@ enum {
     STATE_NUM
 };
 
-// RoboCar control status
-enum {
-    RC_CTRL_MOVE_FORWARD = 0,
-    RC_CTRL_TURN_FWD_LEFT,
-    RC_CTRL_TURN_FWD_RIGHT,
-    RC_CTRL_MOVE_BACKWARD,
-    RC_CTRL_TURN_BACK_LEFT,
-    RC_CTRL_TURN_BACK_RIGHT,
-    RC_CTRL_ROTATE_LEFT,
-    RC_CTRL_ROTATE_RIGHT,
-    RC_CTRL_STOP
-};
-
 // Table of state 
 int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
@@ -97,6 +84,24 @@ int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 /*Turned blue*/ STATE_ROTATO_LEFT,      STATE_GO_FORWARD,       STATE_ROTATO_RIGHT,     STATE_GO_FORWARD,
 };
 
+// Command Mode
+enum {
+    CMD_MODE_KEY,
+    CMD_MODE_LINE
+};
+
+// RoboCar control status
+enum {
+    RC_CTRL_MOVE_FORWARD = 0,
+    RC_CTRL_TURN_FWD_LEFT,
+    RC_CTRL_TURN_FWD_RIGHT,
+    RC_CTRL_MOVE_BACKWARD,
+    RC_CTRL_TURN_BACK_LEFT,
+    RC_CTRL_TURN_BACK_RIGHT,
+    RC_CTRL_ROTATE_LEFT,
+    RC_CTRL_ROTATE_RIGHT,
+    RC_CTRL_STOP
+};
 
 BluetoothSerial SerialBT;
 
@@ -115,6 +120,7 @@ Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
 SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
 
 RPR0521RS rpr0521rs;
+int g_rpr0521rs_enable  = 0; // if RPR-0521RS is enabled
 
 #define PIN_SDA SDA
 #define PIN_SCL SCL
@@ -539,6 +545,7 @@ void Task_line_trace(void* param)
 //===================================================================
 void Task_serial_cmd(void* param)
 {
+    int     cmd_mode = CMD_MODE_LINE;
     char    command_line[256];
     int     cmd_index = 0;
 
@@ -548,14 +555,35 @@ void Task_serial_cmd(void* param)
 
         if(g_pSerial->available() > 0) { // received data
             char getstr = g_pSerial->read(); // Read data from serial-port
-            command_line[cmd_index] = getstr;
-            cmd_index ++;
-            if(getstr == '\n') { // Detect "LF"(enter key)
-                command_line[cmd_index-1] = '\0';
-                cmd_index = 0;
-                
-                // Parse and execute command
-                parse_and_exec_cmd(command_line, g_command_table);
+            if(cmd_mode == CMD_MODE_LINE) {
+                command_line[cmd_index] = getstr;
+                cmd_index ++;
+                if(getstr == '\n') { // Detect "LF"(enter key)
+                    command_line[cmd_index-1] = '\0';
+                    cmd_index = 0;
+                    
+                    // "key" command
+                    char* p = strtok(command_line, " ");
+                    if(p) {
+                        if(strcmp(p, "key") == 0) {
+                            g_pSerial->println("Changed to Key command mode.");
+                            cmd_mode = CMD_MODE_KEY;
+                        }
+                    }
+                    
+                    // Parse and execute command
+                    parse_and_exec_cmd(command_line, g_command_table);
+                }
+            }
+            else { // CMD_MODE_KEY
+                if(getstr == 'z') { // change to Line mode.
+                    g_pSerial->println("Changed to Line command mode.");
+                    cmd_mode = CMD_MODE_LINE;
+                    cmd_index = 0;
+                }
+                else if(getstr == 't') {
+                    parse_and_exec_cmd("test", g_command_table);
+                }
             }
         }
     }
@@ -568,30 +596,31 @@ void Task_serial_cmd(void* param)
 //===================================================================
 void Task_sensor(void* param)
 {
-	xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(1000);
 
         // All proccess should be executed in FreeRTOS tasks.
-    	int error;
-    	unsigned short ps_val;
-    	float als_val;
+        if(g_rpr0521rs_enable) {
+        	int error;
+        	unsigned short ps_val;
+        	float als_val;
 
-    	error = rpr0521rs.get_psalsval(&ps_val, &als_val);
-    	if(error == 0) {
-    		// Proximity
-    		g_pSerial->print("Prox. = ");
-    		g_pSerial->print(ps_val);
-    		g_pSerial->print("\t||\t");
-    		// Brightness
-    		g_pSerial->print("Bright. = ");
-    		g_pSerial->print(als_val);
+        	error = rpr0521rs.get_psalsval(&ps_val, &als_val);
+        	if(error == 0) {
+        		// Proximity
+        		g_pSerial->print("Prox. = ");
+        		g_pSerial->print(ps_val);
+        		g_pSerial->print("\t||\t");
+        		// Brightness
+        		g_pSerial->print("Bright. = ");
+        		g_pSerial->print(als_val);
 
-    		g_pSerial->println();
-    	}
-    	else {
-    		g_pSerial->println("[Error] cannot get sensor data.");
-    	}
+        		g_pSerial->println();
+        	}
+        	else {
+        		g_pSerial->println("[Error] cannot get sensor data.");
+        	}
+        }
     }
 }
 
@@ -607,10 +636,10 @@ void setup()
     // Initialize Bluetooth serial
     SerialBT.begin("ESP32-12135x");
 
-	Wire.begin(PIN_SDA, PIN_SCL);
-
-	byte rc;
-	rc = rpr0521rs.init();
+	byte rc = rpr0521rs.init();
+	if(rc == 0) {
+        g_rpr0521rs_enable = 1;
+    }
 
     // Initialize motor
     MOTOR_init();
@@ -623,7 +652,7 @@ void setup()
     // Create FreeRTOS tasks
     xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 2048, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(Task_serial_cmd, "Task_sensor", 2048, NULL, 3, NULL, 0);
+    xTaskCreatePinnedToCore(Task_sensor, "Task_sensor", 2048, NULL, 3, NULL, 0);
     
     // Create semaphore
 	g_xMutex_Signal = xSemaphoreCreateMutex();
