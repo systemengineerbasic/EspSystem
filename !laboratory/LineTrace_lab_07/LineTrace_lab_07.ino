@@ -10,6 +10,7 @@
 #include "my_cmd.h"
 #include <Wire.h>
 #include <RPR-0521RS.h>
+#include "my_led_button.h"
 
 
 //---------------------- PIN ----------------------
@@ -24,6 +25,10 @@
 #define IO_PIN_LINETRACK_LEFT   (26)
 #define IO_PIN_LINETRACK_CENTER (17)
 #define IO_PIN_LINETRACK_RIGHT  (39)
+// LED
+#define IO_PIN_LED_1            ( 2)
+// Button
+#define IO_PIN_BUTTON_1         ( 0)
 
 //---------------------- D/A converter channel ----------------------
 #define DAC_CH_MOTOR_A          (0)
@@ -121,10 +126,10 @@ SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal c
 
 RPR0521RS rpr0521rs;
 int g_rpr0521rs_enable  = 0; // if RPR-0521RS is enabled
+float   g_brightness_thresh = 10.0; // Bright and dark threshold 
 
-#define PIN_SDA SDA
-#define PIN_SCL SCL
-
+my_led      g_led1(IO_PIN_LED_1);
+my_button   g_button1(IO_PIN_BUTTON_1);
 
 //===================================================================
 // MODULE   : min_max_hold()
@@ -479,7 +484,7 @@ int create_event()
             event = sensor;
         }
     }
-	pre_signal_color = signal_color;
+    pre_signal_color = signal_color;
     
     return event;
 }
@@ -509,7 +514,7 @@ int get_next_state(int cur_state, int event)
 //===================================================================
 void Task_line_trace(void* param)
 {
-	xSemaphoreGive(g_xMutex_Signal);
+    xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(10);
 
@@ -549,9 +554,16 @@ void Task_serial_cmd(void* param)
     char    command_line[256];
     int     cmd_index = 0;
 
-	xSemaphoreGive(g_xMutex_Signal);
+    xSemaphoreGive(g_xMutex_Signal);
     for(;;) {
         vTaskDelay(10);
+        
+        if(g_button1.get_status()) {
+            g_led1.set_status(1);
+        }
+        else {
+            g_led1.set_status(0);
+        }
 
         if(g_pSerial->available() > 0) { // received data
             char getstr = g_pSerial->read(); // Read data from serial-port
@@ -599,27 +611,17 @@ void Task_sensor(void* param)
     for(;;) {
         vTaskDelay(1000);
 
-        // All proccess should be executed in FreeRTOS tasks.
-        if(g_rpr0521rs_enable) {
-        	int error;
-        	unsigned short ps_val;
-        	float als_val;
+        if(g_rpr0521rs_enable) { // RPR-0521RS was initialized
+            unsigned short ps_val;
+            float als_val;
+            rpr0521rs.get_psalsval(&ps_val, &als_val);
 
-        	error = rpr0521rs.get_psalsval(&ps_val, &als_val);
-        	if(error == 0) {
-        		// Proximity
-        		g_pSerial->print("Prox. = ");
-        		g_pSerial->print(ps_val);
-        		g_pSerial->print("\t||\t");
-        		// Brightness
-        		g_pSerial->print("Bright. = ");
-        		g_pSerial->print(als_val);
-
-        		g_pSerial->println();
-        	}
-        	else {
-        		g_pSerial->println("[Error] cannot get sensor data.");
-        	}
+            if(als_val > g_brightness_thresh) {
+                g_led1.set_status(1);
+            }
+            else {
+                g_led1.set_status(0);
+            }
         }
     }
 }
@@ -636,8 +638,8 @@ void setup()
     // Initialize Bluetooth serial
     SerialBT.begin("ESP32-12135x");
 
-	byte rc = rpr0521rs.init();
-	if(rc == 0) {
+    byte rc = rpr0521rs.init();
+    if(rc == 0) {
         g_rpr0521rs_enable = 1;
     }
 
@@ -655,7 +657,7 @@ void setup()
     xTaskCreatePinnedToCore(Task_sensor, "Task_sensor", 2048, NULL, 3, NULL, 0);
     
     // Create semaphore
-	g_xMutex_Signal = xSemaphoreCreateMutex();
+    g_xMutex_Signal = xSemaphoreCreateMutex();
 
     // Go forward
     RoboCar_stop();
