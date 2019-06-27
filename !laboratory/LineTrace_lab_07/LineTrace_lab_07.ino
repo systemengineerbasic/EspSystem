@@ -74,7 +74,25 @@ int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 /*OOO_RED*/     STATE_STOP,             STATE_STOP,             STATE_STOP,             STATE_STOP,
 /*Turned blue*/ STATE_ROTATO_LEFT,      STATE_GO_FORWARD,       STATE_ROTATO_RIGHT,     STATE_GO_FORWARD,
 };
-
+/*
+int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
+{
+//                  Left                Foward              Right               Wait                Stop
+/*XXX*/             STATE_ROTATO_LEFT,  STATE_ROTATO_LEFT,  STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,
+/*XXO*/             STATE_ROTATO_RIGHT, STATE_ROTATO_RIGHT, STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,
+/*XOX*/             STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,
+/*XOO*/             STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,
+/*OXX*/             STATE_ROTATO_LEFT,  STATE_ROTATO_LEFT,  STATE_ROTATO_LEFT,  STATE_WAIT,         STATE_STOP,
+/*OXO*/             STATE_ROTATO_LEFT,  STATE_ROTATO_RIGHT, STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,    
+/*OOX*/             STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,    
+/*OOO_RED*/         STATE_WAIT,         STATE_WAIT,         STATE_WAIT,         STATE_WAIT,         STATE_STOP,
+/*OOO_BLUE*/        STATE_FWD,          STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,
+/*Turned blue*/     STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_GO_FORWARD,   STATE_STOP,
+/*Stop*/            STATE_STOP,         STATE_STOP,         STATE_STOP,         STATE_STOP,         STATE_STOP,
+/*Start(WF==Off)*/  STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_GO_FORWARD,
+/*Start(WF==On)*/   STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_WAIT,
+};
+*/
 // Command Mode
 enum {
     CMD_MODE_KEY,
@@ -98,8 +116,10 @@ Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
 SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
 SemaphoreHandle_t g_xMutex_Sensor = NULL;   // for critical section for reading sensor 
 
-QueueHandle_t g_xQueue_Sensor = NULL;
-QueueHandle_t g_xQueue_Command = NULL;
+QueueHandle_t       g_xQueue_Sensor = NULL;
+QueueHandle_t       g_xQueue_Command = NULL;
+QueueSetHandle_t    g_xQueueSet_RoboCar = NULL;
+
 
 RPR0521RS rpr0521rs;
 int g_mpu6050_enable  = 0; // if MPU-6050 is enabled
@@ -260,6 +280,18 @@ void _cmd__sensor(int argc, char* argv[])
     }
 }
 
+void _cmd__stop(int argc, char* argv[])
+{
+    int cmd = 0;
+    xQueueSend(g_xQueue_Command, &cmd, 0); // Send Q-message to RoboCar-Task
+}
+
+void _cmd__go(int argc, char* argv[])
+{
+    int cmd = 1;
+    xQueueSend(g_xQueue_Command, &cmd, 0); // Send Q-message to RoboCar-Task
+}
+
 //===================================================================
 // Command table
 //===================================================================
@@ -271,6 +303,8 @@ T_command_info  g_command_table[] = {
     {"brightth",    _cmd__brightth},
     {"impactth",    _cmd__impactth},
     {"sensor",      _cmd__sensor},
+    {"stop",        _cmd__stop},
+    {"go",          _cmd__go},
     // The last line must be NULL
     {NULL,          NULL},
 };
@@ -349,25 +383,41 @@ void Task_RoboCar(void* param)
     xSemaphoreGive(g_xMutex_Signal);
     xSemaphoreGive(g_xMutex_Sensor);
     for(;;) {
-		int q_data = 0;
-		BaseType_t	xStatus = xQueueReceive(g_xQueue_Sensor, &q_data, wait_tick);
-		if(xStatus) { // if you receive some data from queue.
-    		if(q_data == 1) {
-                RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd);
-                RoboCar_set_speed_back(g_robocar_setting_speed_back);
-                RoboCar_set_speed_turn(g_robocar_setting_speed_turn);
-                RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate);
+        int event = TRACK_EVENT_NONE;
+        QueueSetMemberHandle_t xHandle = xQueueSelectFromSet(g_xQueueSet_RoboCar, wait_tick);
+        if(xHandle == (QueueSetMemberHandle_t)g_xQueue_Sensor) {
+    		int q_data = 0;
+    		BaseType_t	xStatus = xQueueReceive(g_xQueue_Sensor, &q_data, 0);
+    		if(xStatus) { // if you receive some data from queue.
+        		if(q_data == 1) {
+                    g_pSerial->println("Bright.");
+                    RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd);
+                    RoboCar_set_speed_back(g_robocar_setting_speed_back);
+                    RoboCar_set_speed_turn(g_robocar_setting_speed_turn);
+                    RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate);
+                }
+                else {
+                    g_pSerial->println("Dark.");
+                    RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd-g_robocar_slow_down_delta);
+                    RoboCar_set_speed_back(g_robocar_setting_speed_back-g_robocar_slow_down_delta);
+                    RoboCar_set_speed_turn(g_robocar_setting_speed_turn-g_robocar_slow_down_delta);
+                    RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate-g_robocar_slow_down_delta);
+                }
             }
-            else {
-                RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd-g_robocar_slow_down_delta);
-                RoboCar_set_speed_back(g_robocar_setting_speed_back-g_robocar_slow_down_delta);
-                RoboCar_set_speed_turn(g_robocar_setting_speed_turn-g_robocar_slow_down_delta);
-                RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate-g_robocar_slow_down_delta);
+        }
+        else if(xHandle == (QueueSetMemberHandle_t)g_xQueue_Command) {
+    		int q_data = 0;
+    		BaseType_t	xStatus = xQueueReceive(g_xQueue_Command, &q_data, 0);
+    		if(xStatus) { // if you receive some data from queue.
+                g_pSerial->print("Command = ");
+                g_pSerial->println(q_data);
             }
+        }
+        else {
+            event = create_event();
         }
 
         // Create event
-        int event = create_event();
         if(event != TRACK_EVENT_NONE) { // if event occurs
             // Get next state
             int next_state = get_next_state(g_cur_state, event);
@@ -549,6 +599,9 @@ void setup()
     // Create queue 
     g_xQueue_Sensor = xQueueCreate(8, sizeof(int));
     g_xQueue_Command = xQueueCreate(8, sizeof(int));
+    g_xQueueSet_RoboCar = xQueueCreateSet(2);
+    xQueueAddToSet( g_xQueue_Sensor, g_xQueueSet_RoboCar );
+    xQueueAddToSet( g_xQueue_Command, g_xQueueSet_RoboCar );
 
     // Create FreeRTOS tasks
     xTaskCreatePinnedToCore(Task_RoboCar, "Task_RoboCar", 2048, NULL, 5, NULL, 0);
