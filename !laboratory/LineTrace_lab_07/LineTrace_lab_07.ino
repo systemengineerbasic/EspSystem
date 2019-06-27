@@ -45,16 +45,21 @@ enum {
     TRACK_EVENT_OXO,
     TRACK_EVENT_OOX,
     TRACK_EVENT_OOO_RED,
+    TRACK_EVENT_OOO_BLUE,
     TRACK_EVENT_TURNED_BLUE,
+    TRACK_EVENT_STOP,
+    TRACK_EVENT_START_WF_OFF,
+    TRACK_EVENT_START_WF_ON,
 
     TRACK_EVENT_NUM
 };
 
 // State Machine State
 enum {
-    STATE_ROTATO_LEFT=0,
+    STATE_ROTATE_LEFT=0,
     STATE_GO_FORWARD,
-    STATE_ROTATO_RIGHT,
+    STATE_ROTATE_RIGHT,
+    STATE_WAIT,
     STATE_STOP,
 
     STATE_NUM
@@ -63,36 +68,22 @@ enum {
 // Table of state 
 int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
-//              Left                    Foward                  Right                   Stop
-/*XXX*/         STATE_ROTATO_LEFT,      STATE_ROTATO_LEFT,      STATE_ROTATO_RIGHT,     STATE_STOP,
-/*XXO*/         STATE_ROTATO_RIGHT,     STATE_ROTATO_RIGHT,     STATE_ROTATO_RIGHT,     STATE_STOP,
-/*XOX*/         STATE_GO_FORWARD,       STATE_GO_FORWARD,       STATE_GO_FORWARD,       STATE_STOP,
-/*XOO*/         STATE_GO_FORWARD,       STATE_GO_FORWARD,       STATE_ROTATO_RIGHT,     STATE_STOP,    
-/*OXX*/         STATE_ROTATO_LEFT,      STATE_ROTATO_LEFT,      STATE_ROTATO_LEFT,      STATE_STOP,
-/*OXO*/         STATE_ROTATO_LEFT,      STATE_ROTATO_RIGHT,     STATE_ROTATO_RIGHT,     STATE_STOP,    
-/*OOX*/         STATE_ROTATO_LEFT,      STATE_GO_FORWARD,       STATE_GO_FORWARD,       STATE_STOP,    
-/*OOO_RED*/     STATE_STOP,             STATE_STOP,             STATE_STOP,             STATE_STOP,
-/*Turned blue*/ STATE_ROTATO_LEFT,      STATE_GO_FORWARD,       STATE_ROTATO_RIGHT,     STATE_GO_FORWARD,
-};
-/*
-int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
-{
 //                  Left                Foward              Right               Wait                Stop
-/*XXX*/             STATE_ROTATO_LEFT,  STATE_ROTATO_LEFT,  STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,
-/*XXO*/             STATE_ROTATO_RIGHT, STATE_ROTATO_RIGHT, STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,
+/*XXX*/             STATE_ROTATE_LEFT,  STATE_ROTATE_LEFT,  STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,
+/*XXO*/             STATE_ROTATE_RIGHT, STATE_ROTATE_RIGHT, STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,
 /*XOX*/             STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,
-/*XOO*/             STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,
-/*OXX*/             STATE_ROTATO_LEFT,  STATE_ROTATO_LEFT,  STATE_ROTATO_LEFT,  STATE_WAIT,         STATE_STOP,
-/*OXO*/             STATE_ROTATO_LEFT,  STATE_ROTATO_RIGHT, STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_STOP,    
-/*OOX*/             STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,    
+/*XOO*/             STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,
+/*OXX*/             STATE_ROTATE_LEFT,  STATE_ROTATE_LEFT,  STATE_ROTATE_LEFT,  STATE_WAIT,         STATE_STOP,
+/*OXO*/             STATE_ROTATE_LEFT,  STATE_ROTATE_RIGHT, STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,    
+/*OOX*/             STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,    
 /*OOO_RED*/         STATE_WAIT,         STATE_WAIT,         STATE_WAIT,         STATE_WAIT,         STATE_STOP,
-/*OOO_BLUE*/        STATE_FWD,          STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,
-/*Turned blue*/     STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_GO_FORWARD,   STATE_STOP,
+/*OOO_BLUE*/        STATE_ROTATE_LEFT,   STATE_GO_FORWARD,   STATE_ROTATE_RIGHT,   STATE_WAIT,         STATE_STOP,
+/*Turned blue*/     STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_ROTATE_RIGHT, STATE_GO_FORWARD,   STATE_STOP,
 /*Stop*/            STATE_STOP,         STATE_STOP,         STATE_STOP,         STATE_STOP,         STATE_STOP,
-/*Start(WF==Off)*/  STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_GO_FORWARD,
-/*Start(WF==On)*/   STATE_ROTATO_LEFT,  STATE_GO_FORWARD,   STATE_ROTATO_RIGHT, STATE_WAIT,         STATE_WAIT,
+/*Start(WF==Off)*/  STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_GO_FORWARD,
+/*Start(WF==On)*/   STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_WAIT,
 };
-*/
+
 // Command Mode
 enum {
     CMD_MODE_KEY,
@@ -101,17 +92,18 @@ enum {
 
 BluetoothSerial SerialBT;
 
-int g_cur_state;    // Current state
-int g_trafic_signal_color = SIGNAL_COLOR_RED;
+int g_cur_state=STATE_STOP;    // Current state
+int g_signal_wait_flag=0;
+int g_trafic_signal_color = SIGNAL_COLOR_BLUE;
 
-int g_robocar_setting_speed_fwd = 200;
-int g_robocar_setting_speed_back = 200;
-int g_robocar_setting_speed_turn = 200;
-int g_robocar_setting_speed_rotate = 200;
+int g_robocar_setting_speed_fwd = 150;
+int g_robocar_setting_speed_back = 150;
+int g_robocar_setting_speed_turn = 150;
+int g_robocar_setting_speed_rotate = 150;
 int g_robocar_setting_lr_level = 40;
 int g_robocar_slow_down_delta = 50;
 
-Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
+Stream* g_pSerial=&SerialBT; // Selected serial port (USB is default)
 
 SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
 SemaphoreHandle_t g_xMutex_Sensor = NULL;   // for critical section for reading sensor 
@@ -334,6 +326,7 @@ int create_event()
     int sensor_R = read_sensor_R();
     int sensor = ((sensor_L&0x1)<<2) | ((sensor_C&0x1)<<1) | ((sensor_R&0x1)<<0);
     
+    // Create event
     int event = TRACK_EVENT_NONE;
     if((signal_color==SIGNAL_COLOR_BLUE) && (pre_signal_color!=SIGNAL_COLOR_BLUE)) { // The signal turned blue
         event = TRACK_EVENT_TURNED_BLUE;
@@ -343,6 +336,9 @@ int create_event()
             if(signal_color == SIGNAL_COLOR_RED) {
                 event = TRACK_EVENT_OOO_RED;
             }
+            else {
+                event = TRACK_EVENT_OOO_BLUE;
+            }
         }
         else { // except for "OOO"
             event = sensor;
@@ -350,6 +346,24 @@ int create_event()
     }
     pre_signal_color = signal_color;
     
+    // Event Action
+    if(event == TRACK_EVENT_OOO_RED) {
+        switch(g_cur_state) {
+            case STATE_ROTATE_LEFT:
+            case STATE_ROTATE_RIGHT:
+            case STATE_GO_FORWARD:
+                g_signal_wait_flag = 1;
+                break;
+        }
+    }
+    else if(event == TRACK_EVENT_TURNED_BLUE) {
+        switch(g_cur_state) {
+            case STATE_WAIT:
+                g_signal_wait_flag = 0;
+                break;
+        }
+    }
+   
     return event;
 }
 
@@ -378,10 +392,15 @@ int get_next_state(int cur_state, int event)
 //===================================================================
 void Task_RoboCar(void* param)
 {
-    portTickType 	wait_tick = 10/portTICK_RATE_MS; // 10[ms];
+    portTickType 	wait_tick = 1/portTICK_RATE_MS; // 1[ms];
     
     xSemaphoreGive(g_xMutex_Signal);
     xSemaphoreGive(g_xMutex_Sensor);
+    
+    // Initial state
+    g_cur_state = STATE_STOP;
+    RoboCar_stop();
+    
     for(;;) {
         int event = TRACK_EVENT_NONE;
         QueueSetMemberHandle_t xHandle = xQueueSelectFromSet(g_xQueueSet_RoboCar, wait_tick);
@@ -411,6 +430,17 @@ void Task_RoboCar(void* param)
     		if(xStatus) { // if you receive some data from queue.
                 g_pSerial->print("Command = ");
                 g_pSerial->println(q_data);
+                if(q_data == 0) { // Stop
+                    event = TRACK_EVENT_STOP;
+                }
+                else {
+                    if(g_signal_wait_flag) {
+                        event = TRACK_EVENT_START_WF_ON;
+                    }
+                    else {
+                        event = TRACK_EVENT_START_WF_OFF;
+                    }
+                }
             }
         }
         else {
@@ -424,14 +454,17 @@ void Task_RoboCar(void* param)
             
             if(next_state != g_cur_state) { // Next state is different from current state => State transition occurs
                 // Process accoring to state
-                if(next_state == STATE_ROTATO_LEFT) {
+                if(next_state == STATE_ROTATE_LEFT) {
                     RoboCar_rotate_left();
                 }
                 else if(next_state == STATE_GO_FORWARD) {
                     RoboCar_move_forward();
                 }
-                else if(next_state == STATE_ROTATO_RIGHT) {
+                else if(next_state == STATE_ROTATE_RIGHT) {
                     RoboCar_rotate_right();
+                }
+                else if(next_state == STATE_WAIT) {
+                    RoboCar_stop();
                 }
                 else if(next_state == STATE_STOP) {
                     RoboCar_stop();
@@ -552,10 +585,10 @@ void Task_sensor(void* param)
             if(cur_brigth_status != brigth_status) {
                 xQueueSend(g_xQueue_Sensor, &brigth_status, 0); // Send Q-message to RoboCar-Task
                 if(brigth_status == 1) {
-                    g_led2.turn(1);
+                    g_led2.turn(0);
                 }
                 else {
-                    g_led2.turn(0);
+                    g_led2.turn(1);
                 }
                 cur_brigth_status = brigth_status;
             }

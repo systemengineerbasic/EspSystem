@@ -38,11 +38,11 @@ enum {
 };
 
 
-int g_robocar_control_state;
-int g_robocar_speed_fwd = 200;
-int g_robocar_speed_back = 200;
-int g_robocar_speed_rotate = 200;
-int g_robocar_speed_turn = 200;
+int g_control_state;
+int g_speed_fwd = 200;
+int g_speed_back = 200;
+int g_speed_rotate = 200;
+int g_speed_turn = 200;
 
 int g_lr_level = 40;
 
@@ -156,29 +156,29 @@ void MOTOR_set_dir_right(int dir)
 void RoboCar_control()
 {
     // Speed
-    switch(g_robocar_control_state) {
+    switch(g_control_state) {
         case RC_CTRL_MOVE_FORWARD:
-            MOTOR_set_power_left(g_robocar_speed_fwd);
-            MOTOR_set_power_right(g_robocar_speed_fwd);
+            MOTOR_set_power_left(g_speed_fwd);
+            MOTOR_set_power_right(g_speed_fwd);
             break;
         case RC_CTRL_MOVE_BACKWARD:
-            MOTOR_set_power_left(g_robocar_speed_back);
-            MOTOR_set_power_right(g_robocar_speed_back);
+            MOTOR_set_power_left(g_speed_back);
+            MOTOR_set_power_right(g_speed_back);
             break;
         case RC_CTRL_TURN_FWD_LEFT:
         case RC_CTRL_TURN_BACK_LEFT:
-            MOTOR_set_power_left(g_robocar_speed_turn-g_lr_level);
-            MOTOR_set_power_right(g_robocar_speed_turn);
+            MOTOR_set_power_left(g_speed_turn-g_lr_level);
+            MOTOR_set_power_right(g_speed_turn);
             break;
         case RC_CTRL_TURN_FWD_RIGHT:
         case RC_CTRL_TURN_BACK_RIGHT:
-            MOTOR_set_power_left(g_robocar_speed_turn);
-            MOTOR_set_power_right(g_robocar_speed_turn-g_lr_level);
+            MOTOR_set_power_left(g_speed_turn);
+            MOTOR_set_power_right(g_speed_turn-g_lr_level);
             break;
         case RC_CTRL_ROTATE_LEFT:
         case RC_CTRL_ROTATE_RIGHT:
-            MOTOR_set_power_left(g_robocar_speed_rotate);
-            MOTOR_set_power_right(g_robocar_speed_rotate);
+            MOTOR_set_power_left(g_speed_rotate);
+            MOTOR_set_power_right(g_speed_rotate);
             break;
         case RC_CTRL_STOP:
             MOTOR_set_power_left(0);
@@ -187,7 +187,7 @@ void RoboCar_control()
     }
 
     // Direction
-    switch(g_robocar_control_state) {
+    switch(g_control_state) {
         case RC_CTRL_MOVE_FORWARD:
         case RC_CTRL_TURN_FWD_LEFT:
         case RC_CTRL_TURN_FWD_RIGHT:
@@ -234,47 +234,47 @@ void RoboCar_init()
 //===================================================================
 void RoboCar_move_forward()
 {
-    g_robocar_control_state = RC_CTRL_MOVE_FORWARD;
+    g_control_state = RC_CTRL_MOVE_FORWARD;
     RoboCar_control();
 }
 void RoboCar_move_backward()
 {
-    g_robocar_control_state = RC_CTRL_MOVE_BACKWARD;
+    g_control_state = RC_CTRL_MOVE_BACKWARD;
     RoboCar_control();
 }
 void RoboCar_turn_fwd_left()
 {
-    g_robocar_control_state = RC_CTRL_TURN_FWD_LEFT;
+    g_control_state = RC_CTRL_TURN_FWD_LEFT;
     RoboCar_control();
 }
 void RoboCar_turn_back_left()
 {
-    g_robocar_control_state = RC_CTRL_TURN_BACK_LEFT;
+    g_control_state = RC_CTRL_TURN_BACK_LEFT;
     RoboCar_control();
 }
 void RoboCar_turn_fwd_right()
 {
-    g_robocar_control_state = RC_CTRL_TURN_FWD_RIGHT;
+    g_control_state = RC_CTRL_TURN_FWD_RIGHT;
     RoboCar_control();
 }
 void RoboCar_turn_back_right()
 {
-    g_robocar_control_state = RC_CTRL_TURN_BACK_RIGHT;
+    g_control_state = RC_CTRL_TURN_BACK_RIGHT;
     RoboCar_control();
 }
 void RoboCar_rotate_left()
 {
-    g_robocar_control_state = RC_CTRL_ROTATE_LEFT;
+    g_control_state = RC_CTRL_ROTATE_LEFT;
     RoboCar_control();
 }
 void RoboCar_rotate_right()
 {
-    g_robocar_control_state = RC_CTRL_ROTATE_RIGHT;
+    g_control_state = RC_CTRL_ROTATE_RIGHT;
     RoboCar_control();
 }
 void RoboCar_stop()
 {
-    g_robocar_control_state = RC_CTRL_STOP;
+    g_control_state = RC_CTRL_STOP;
     RoboCar_control();
 }
 
@@ -284,22 +284,22 @@ void RoboCar_stop()
 //===================================================================
 void RoboCar_set_speed_fwd(int speed)
 {
-    g_robocar_speed_fwd = min_max_hold(speed, 0, 255);
+    g_speed_fwd = min_max_hold(speed, 0, 255);
     RoboCar_control();
 }
 void RoboCar_set_speed_back(int speed)
 {
-    g_robocar_speed_back = min_max_hold(speed, 0, 255);
+    g_speed_back = min_max_hold(speed, 0, 255);
     RoboCar_control();
 }
 void RoboCar_set_speed_turn(int speed)
 {
-    g_robocar_speed_turn = min_max_hold(speed, 0, 255);
+    g_speed_turn = min_max_hold(speed, 0, 255);
     RoboCar_control();
 }
 void RoboCar_set_speed_rotate(int speed)
 {
-    g_robocar_speed_rotate = min_max_hold(speed, 0, 255);
+    g_speed_rotate = min_max_hold(speed, 0, 255);
     RoboCar_control();
 }
 
