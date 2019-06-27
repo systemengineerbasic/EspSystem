@@ -12,20 +12,10 @@
 #include <RPR-0521RS.h>
 #include <MPU6050.h>
 #include <my_led_button.h>
+#include "RoboCar.h"
 
 
 //---------------------- PIN ----------------------
-// Motor
-#define IO_PIN_MOTOR_1          (14)
-#define IO_PIN_MOTOR_2          (12)
-#define IO_PIN_MOTOR_3          (13)
-#define IO_PIN_MOTOR_4          (23)
-#define IO_PIN_MOTOR_ENA        (16)
-#define IO_PIN_MOTOR_ENB        (27)
-// Line Tracking Sensor
-#define IO_PIN_LINETRACK_LEFT   (26)
-#define IO_PIN_LINETRACK_CENTER (17)
-#define IO_PIN_LINETRACK_RIGHT  (39)
 // LED
 #define IO_PIN_LED_1            ( 2)
 #define IO_PIN_LED_2            (18)
@@ -33,8 +23,6 @@
 #define IO_PIN_BUTTON_1         ( 0)
 
 //---------------------- D/A converter channel ----------------------
-#define DAC_CH_MOTOR_A          (0)
-#define DAC_CH_MOTOR_B          (1)
 #define DAC_CH_SERVO            (2)
 #define DAC_CH_LED_1            (3)
 #define DAC_CH_LED_2            (4)
@@ -44,12 +32,6 @@
 #define SIGNAL_COLOR_BLUE       (1)
 #define SIGNAL_COLOR_YELLOW     (2)
 #define SIGNAL_COLOR_RED        (3)
-
-//---------------------- RoboCar ----------------------
-// Motor derection
-#define MOTOR_DIR_STOP          (0)
-#define MOTOR_DIR_FWD           (1)
-#define MOTOR_DIR_REV           (2)
 
 //---------------------- State machine ----------------------
 // State Machine Event
@@ -99,38 +81,25 @@ enum {
     CMD_MODE_LINE
 };
 
-// RoboCar control status
-enum {
-    RC_CTRL_MOVE_FORWARD = 0,
-    RC_CTRL_TURN_FWD_LEFT,
-    RC_CTRL_TURN_FWD_RIGHT,
-    RC_CTRL_MOVE_BACKWARD,
-    RC_CTRL_TURN_BACK_LEFT,
-    RC_CTRL_TURN_BACK_RIGHT,
-    RC_CTRL_ROTATE_LEFT,
-    RC_CTRL_ROTATE_RIGHT,
-    RC_CTRL_STOP
-};
-
 BluetoothSerial SerialBT;
 
 int g_cur_state;    // Current state
 int g_trafic_signal_color = SIGNAL_COLOR_RED;
 
-int g_robocar_control_state;
-int g_robocar_speed_fwd = 200;
-int g_robocar_speed_back = 200;
-int g_robocar_speed_rotate = 200;
-int g_robocar_speed_turn = 200;
+int g_robocar_setting_speed_fwd = 200;
+int g_robocar_setting_speed_back = 200;
+int g_robocar_setting_speed_turn = 200;
+int g_robocar_setting_speed_rotate = 200;
+int g_robocar_setting_lr_level = 40;
 int g_robocar_slow_down_delta = 50;
-int g_lr_level = 40;
 
 Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
 
 SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
 SemaphoreHandle_t g_xMutex_Sensor = NULL;   // for critical section for reading sensor 
 
-QueueHandle_t g_xQueue_RoboCar = NULL;
+QueueHandle_t g_xQueue_Sensor = NULL;
+QueueHandle_t g_xQueue_Command = NULL;
 
 RPR0521RS rpr0521rs;
 int g_mpu6050_enable  = 0; // if MPU-6050 is enabled
@@ -139,25 +108,6 @@ float   g_brightness_thresh = 100.0; // Bright and dark threshold
 float   g_impact_thresh = 0.5; // Threshold for impact detection
 my_led      g_led1(IO_PIN_LED_1, DAC_CH_LED_1);
 my_led      g_led2(IO_PIN_LED_2, DAC_CH_LED_2);
-
-//===================================================================
-// MODULE   : min_max_hold()
-// FUNCTION : val is clipped by hold_min/hold_max;
-// RETURN   : holded value
-//===================================================================
-int min_max_hold(int val, int hold_min, int hold_max)
-{
-    int ret = val;
-    
-    if(val < hold_min ) {
-        ret = val;
-    }
-    else if(val > hold_max) {
-        ret = val;
-    }
-    
-    return val;
-}   
 
 //===================================================================
 // Command procedures
@@ -185,10 +135,14 @@ void _cmd__speed(int argc, char* argv[])
 {
     if(argc > 1) {
         int speed = atoi(argv[1]);
-        RoboCar_set_speed_fwd(speed);
-        RoboCar_set_speed_back(speed);
-        RoboCar_set_speed_turn(speed);
-        RoboCar_set_speed_rotate(speed);
+        g_robocar_setting_speed_fwd = speed;
+        g_robocar_setting_speed_back = speed;
+        g_robocar_setting_speed_turn = speed;
+        g_robocar_setting_speed_rotate = speed;
+        RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd);
+        RoboCar_set_speed_back(g_robocar_setting_speed_back);
+        RoboCar_set_speed_turn(g_robocar_setting_speed_turn);
+        RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate);
     }
 }
 
@@ -323,227 +277,6 @@ T_command_info  g_command_table[] = {
 
 
 //===================================================================
-// MODULE   : read_sensor_L/C/R()
-// FUNCTION : Read photo sensor(Left/Center/Right)
-// RETURN   : N/A
-//===================================================================
-int read_sensor_L()
-{
-    return !digitalRead(IO_PIN_LINETRACK_LEFT);
-}
-int read_sensor_C()
-{
-    return !digitalRead(IO_PIN_LINETRACK_CENTER);
-}
-int read_sensor_R()
-{
-    return !digitalRead(IO_PIN_LINETRACK_RIGHT);
-}
-
-//===================================================================
-// MODULE   : MOTOR_init()
-// FUNCTION : Initialize motor setup
-// RETURN   : N/A
-//===================================================================
-void MOTOR_init()
-{
-    // Initialize I/O pin
-    pinMode(IO_PIN_MOTOR_1, OUTPUT);
-    pinMode(IO_PIN_MOTOR_2, OUTPUT);
-    pinMode(IO_PIN_MOTOR_3, OUTPUT);
-    pinMode(IO_PIN_MOTOR_4, OUTPUT);
-    pinMode(IO_PIN_MOTOR_ENA, OUTPUT);
-    pinMode(IO_PIN_MOTOR_ENB, OUTPUT);
-
-    // Assign the pins to D/A converter channels
-    ledcSetup(DAC_CH_MOTOR_A, 980, 8);
-    ledcSetup(DAC_CH_MOTOR_B, 980, 8);
-    ledcAttachPin(IO_PIN_MOTOR_ENA, DAC_CH_MOTOR_A);
-    ledcAttachPin(IO_PIN_MOTOR_ENB, DAC_CH_MOTOR_B);
-}
-
-//===================================================================
-// MODULE   : MOTOR_set_power_left()/MOTOR_set_power_right()
-// FUNCTION : set left/right motor power
-// RETURN   : N/A
-//===================================================================
-void MOTOR_set_power_left(int speed) // speed:0-255
-{
-    ledcWrite(DAC_CH_MOTOR_A, speed);  
-}
-void MOTOR_set_power_right(int speed) // speed:0-255
-{
-    ledcWrite(DAC_CH_MOTOR_B, speed);  
-}
-
-//===================================================================
-// MODULE   : MOTOR_set_dir_left()/MOTOR_set_dir_right()
-// FUNCTION : set left/right direction of motor rotation
-// RETURN   : N/A
-//===================================================================
-void MOTOR_set_dir_left(int dir)
-{
-    if(dir == MOTOR_DIR_FWD) {
-        digitalWrite(IO_PIN_MOTOR_1, HIGH);
-        digitalWrite(IO_PIN_MOTOR_2, LOW);
-    }
-    else if(dir == MOTOR_DIR_REV) {
-        digitalWrite(IO_PIN_MOTOR_1, LOW);
-        digitalWrite(IO_PIN_MOTOR_2, HIGH);
-    }
-}
-void MOTOR_set_dir_right(int dir)
-{
-    if(dir == MOTOR_DIR_FWD) {
-        digitalWrite(IO_PIN_MOTOR_3, LOW);
-        digitalWrite(IO_PIN_MOTOR_4, HIGH);
-    }
-    else if(dir == MOTOR_DIR_REV) {
-        digitalWrite(IO_PIN_MOTOR_3, HIGH);
-        digitalWrite(IO_PIN_MOTOR_4, LOW);
-    }
-}
-
-//===================================================================
-// FUNCTION : Control behavior of the RoboCar
-// RETURN   : N/A
-//===================================================================
-void RoboCar_move_forward()
-{
-    g_robocar_control_state = RC_CTRL_MOVE_FORWARD;
-    RoboCar_control();
-}
-void RoboCar_move_backward()
-{
-    g_robocar_control_state = RC_CTRL_MOVE_BACKWARD;
-    RoboCar_control();
-}
-void RoboCar_turn_fwd_left()
-{
-    g_robocar_control_state = RC_CTRL_TURN_FWD_LEFT;
-    RoboCar_control();
-}
-void RoboCar_turn_back_left()
-{
-    g_robocar_control_state = RC_CTRL_TURN_BACK_LEFT;
-    RoboCar_control();
-}
-void RoboCar_turn_fwd_right()
-{
-    g_robocar_control_state = RC_CTRL_TURN_FWD_RIGHT;
-    RoboCar_control();
-}
-void RoboCar_turn_back_right()
-{
-    g_robocar_control_state = RC_CTRL_TURN_BACK_RIGHT;
-    RoboCar_control();
-}
-void RoboCar_rotate_left()
-{
-    g_robocar_control_state = RC_CTRL_ROTATE_LEFT;
-    RoboCar_control();
-}
-void RoboCar_rotate_right()
-{
-    g_robocar_control_state = RC_CTRL_ROTATE_RIGHT;
-    RoboCar_control();
-}
-void RoboCar_stop()
-{
-    g_robocar_control_state = RC_CTRL_STOP;
-    RoboCar_control();
-}
-
-//===================================================================
-// FUNCTION : Set speed of the RoboCar
-// RETURN   : N/A
-//===================================================================
-void RoboCar_set_speed_fwd(int speed)
-{
-    g_robocar_speed_fwd = min_max_hold(speed, 0, 255);
-    RoboCar_control();
-}
-void RoboCar_set_speed_back(int speed)
-{
-    g_robocar_speed_back = min_max_hold(speed, 0, 255);
-    RoboCar_control();
-}
-void RoboCar_set_speed_turn(int speed)
-{
-    g_robocar_speed_turn = min_max_hold(speed, 0, 255);
-    RoboCar_control();
-}
-void RoboCar_set_speed_rotate(int speed)
-{
-    g_robocar_speed_rotate = min_max_hold(speed, 0, 255);
-    RoboCar_control();
-}
-
-//===================================================================
-// MODULE   : RoboCar_control()
-// FUNCTION : Control speed and direction of the RoboCar.
-// RETURN   : N/A
-//===================================================================
-void RoboCar_control()
-{
-    // Speed
-    switch(g_robocar_control_state) {
-        case RC_CTRL_MOVE_FORWARD:
-            MOTOR_set_power_left(g_robocar_speed_fwd);
-            MOTOR_set_power_right(g_robocar_speed_fwd);
-            break;
-        case RC_CTRL_MOVE_BACKWARD:
-            MOTOR_set_power_left(g_robocar_speed_back);
-            MOTOR_set_power_right(g_robocar_speed_back);
-            break;
-        case RC_CTRL_TURN_FWD_LEFT:
-        case RC_CTRL_TURN_BACK_LEFT:
-            MOTOR_set_power_left(g_robocar_speed_turn-g_lr_level);
-            MOTOR_set_power_right(g_robocar_speed_turn);
-            break;
-        case RC_CTRL_TURN_FWD_RIGHT:
-        case RC_CTRL_TURN_BACK_RIGHT:
-            MOTOR_set_power_left(g_robocar_speed_turn);
-            MOTOR_set_power_right(g_robocar_speed_turn-g_lr_level);
-            break;
-        case RC_CTRL_ROTATE_LEFT:
-        case RC_CTRL_ROTATE_RIGHT:
-            MOTOR_set_power_left(g_robocar_speed_rotate);
-            MOTOR_set_power_right(g_robocar_speed_rotate);
-            break;
-        case RC_CTRL_STOP:
-            MOTOR_set_power_left(0);
-            MOTOR_set_power_right(0);
-            break;
-    }
-
-    // Direction
-    switch(g_robocar_control_state) {
-        case RC_CTRL_MOVE_FORWARD:
-        case RC_CTRL_TURN_FWD_LEFT:
-        case RC_CTRL_TURN_FWD_RIGHT:
-        case RC_CTRL_STOP:
-            MOTOR_set_dir_left(MOTOR_DIR_FWD);
-            MOTOR_set_dir_right(MOTOR_DIR_FWD);
-            break;
-        case RC_CTRL_MOVE_BACKWARD:
-        case RC_CTRL_TURN_BACK_LEFT:
-        case RC_CTRL_TURN_BACK_RIGHT:
-            MOTOR_set_dir_left(MOTOR_DIR_REV);
-            MOTOR_set_dir_right(MOTOR_DIR_REV);
-            break;
-        case RC_CTRL_ROTATE_LEFT:
-            MOTOR_set_dir_left(MOTOR_DIR_REV);
-            MOTOR_set_dir_right(MOTOR_DIR_FWD);
-            break;
-        case RC_CTRL_ROTATE_RIGHT:
-            MOTOR_set_dir_left(MOTOR_DIR_FWD);
-            MOTOR_set_dir_right(MOTOR_DIR_REV);
-            break;
-    }
-}
-
-//===================================================================
 // MODULE   : create_event()
 // FUNCTION : Create event ID for the state machine
 // RETURN   : Event ID
@@ -605,11 +338,11 @@ int get_next_state(int cur_state, int event)
 }
 
 //===================================================================
-// MODULE   : Task_line_trace()
+// MODULE   : Task_RoboCar()
 // FUNCTION : [Task] Control RoboCar for line tracking
 // RETURN   : N/A
 //===================================================================
-void Task_line_trace(void* param)
+void Task_RoboCar(void* param)
 {
     portTickType 	wait_tick = 10/portTICK_RATE_MS; // 10[ms];
     
@@ -617,21 +350,19 @@ void Task_line_trace(void* param)
     xSemaphoreGive(g_xMutex_Sensor);
     for(;;) {
 		int q_data = 0;
-		BaseType_t	xStatus = xQueueReceive(g_xQueue_RoboCar, &q_data, wait_tick);
+		BaseType_t	xStatus = xQueueReceive(g_xQueue_Sensor, &q_data, wait_tick);
 		if(xStatus) { // if you receive some data from queue.
     		if(q_data == 1) {
-                g_pSerial->println("Bright");
-                RoboCar_set_speed_fwd(200);
-                RoboCar_set_speed_back(200);
-                RoboCar_set_speed_turn(200);
-                RoboCar_set_speed_rotate(200);
+                RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd);
+                RoboCar_set_speed_back(g_robocar_setting_speed_back);
+                RoboCar_set_speed_turn(g_robocar_setting_speed_turn);
+                RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate);
             }
             else {
-                g_pSerial->println("Dark");
-                RoboCar_set_speed_fwd(150);
-                RoboCar_set_speed_back(150);
-                RoboCar_set_speed_turn(150);
-                RoboCar_set_speed_rotate(150);
+                RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd-g_robocar_slow_down_delta);
+                RoboCar_set_speed_back(g_robocar_setting_speed_back-g_robocar_slow_down_delta);
+                RoboCar_set_speed_turn(g_robocar_setting_speed_turn-g_robocar_slow_down_delta);
+                RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate-g_robocar_slow_down_delta);
             }
         }
 
@@ -769,7 +500,7 @@ void Task_sensor(void* param)
                 brigth_status = 0;
             }
             if(cur_brigth_status != brigth_status) {
-                xQueueSend(g_xQueue_RoboCar, &brigth_status, 0); // Send Q-message to RoboCar-Task
+                xQueueSend(g_xQueue_Sensor, &brigth_status, 0); // Send Q-message to RoboCar-Task
                 if(brigth_status == 1) {
                     g_led2.turn(1);
                 }
@@ -808,23 +539,19 @@ void setup()
         g_mpu6050_enable = 1;
     }
 
-    // Initialize motor
-    MOTOR_init();
-
-    // Initialize line tracking sensor pin
-    pinMode(IO_PIN_LINETRACK_LEFT, INPUT);
-    pinMode(IO_PIN_LINETRACK_CENTER, INPUT);
-    pinMode(IO_PIN_LINETRACK_RIGHT, INPUT);
+    // Initialize RoboCar
+    RoboCar_init();
 
     // Create semaphore
     g_xMutex_Signal = xSemaphoreCreateMutex();
     g_xMutex_Sensor = xSemaphoreCreateMutex();
 
     // Create queue 
-    g_xQueue_RoboCar = xQueueCreate(8, sizeof(int));
+    g_xQueue_Sensor = xQueueCreate(8, sizeof(int));
+    g_xQueue_Command = xQueueCreate(8, sizeof(int));
 
     // Create FreeRTOS tasks
-    xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(Task_RoboCar, "Task_RoboCar", 2048, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(Task_serial_cmd, "Task_serial_cmd", 4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(Task_sensor, "Task_sensor", 2048, NULL, 3, NULL, 0);
     
