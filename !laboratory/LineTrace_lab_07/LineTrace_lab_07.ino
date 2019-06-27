@@ -122,6 +122,7 @@ int g_robocar_speed_fwd = 200;
 int g_robocar_speed_back = 200;
 int g_robocar_speed_rotate = 200;
 int g_robocar_speed_turn = 200;
+int g_robocar_slow_down_delta = 50;
 int g_lr_level = 40;
 
 Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
@@ -129,10 +130,12 @@ Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
 SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
 SemaphoreHandle_t g_xMutex_Sensor = NULL;   // for critical section for reading sensor 
 
+QueueHandle_t g_xQueue_RoboCar = NULL;
+
 RPR0521RS rpr0521rs;
 int g_mpu6050_enable  = 0; // if MPU-6050 is enabled
 int g_rpr0521rs_enable  = 0; // if RPR-0521RS is enabled
-float   g_brightness_thresh = 10.0; // Bright and dark threshold 
+float   g_brightness_thresh = 100.0; // Bright and dark threshold 
 float   g_impact_thresh = 0.5; // Threshold for impact detection
 my_led      g_led1(IO_PIN_LED_1, DAC_CH_LED_1);
 my_led      g_led2(IO_PIN_LED_2, DAC_CH_LED_2);
@@ -608,10 +611,29 @@ int get_next_state(int cur_state, int event)
 //===================================================================
 void Task_line_trace(void* param)
 {
+    portTickType 	wait_tick = 10/portTICK_RATE_MS; // 10[ms];
+    
     xSemaphoreGive(g_xMutex_Signal);
     xSemaphoreGive(g_xMutex_Sensor);
     for(;;) {
-        vTaskDelay(10);
+		int q_data = 0;
+		BaseType_t	xStatus = xQueueReceive(g_xQueue_RoboCar, &q_data, wait_tick);
+		if(xStatus) { // if you receive some data from queue.
+    		if(q_data == 1) {
+                g_pSerial->println("Bright");
+                RoboCar_set_speed_fwd(200);
+                RoboCar_set_speed_back(200);
+                RoboCar_set_speed_turn(200);
+                RoboCar_set_speed_rotate(200);
+            }
+            else {
+                g_pSerial->println("Dark");
+                RoboCar_set_speed_fwd(150);
+                RoboCar_set_speed_back(150);
+                RoboCar_set_speed_turn(150);
+                RoboCar_set_speed_rotate(150);
+            }
+        }
 
         // Create event
         int event = create_event();
@@ -704,6 +726,7 @@ void Task_sensor(void* param)
     xSemaphoreGive(g_xMutex_Sensor);
 	byte rc;
 	float pre_abs_axl = 0;
+    int   cur_brigth_status=-1;
 	portTickType wakeupTime = xTaskGetTickCount();
     for(;;) {
         vTaskDelayUntil(&wakeupTime, 50);
@@ -738,11 +761,22 @@ void Task_sensor(void* param)
             xSemaphoreTake(g_xMutex_Sensor, portMAX_DELAY); // ¥¥¥ Start critical section ¥¥¥
             rpr0521rs.get_psalsval(&ps_val, &als_val);
             xSemaphoreGive(g_xMutex_Sensor); // £££ End critical section £££
-            if(als_val > g_brightness_thresh) {
-                g_led2.turn(1);
+            int   brigth_status;
+            if(als_val > g_brightness_thresh) { // Bright 
+                brigth_status = 1;
             }
-            else {
-                g_led2.turn(0);
+            else { // Dark
+                brigth_status = 0;
+            }
+            if(cur_brigth_status != brigth_status) {
+                xQueueSend(g_xQueue_RoboCar, &brigth_status, 0); // Send Q-message to RoboCar-Task
+                if(brigth_status == 1) {
+                    g_led2.turn(1);
+                }
+                else {
+                    g_led2.turn(0);
+                }
+                cur_brigth_status = brigth_status;
             }
         }
     }
@@ -785,6 +819,9 @@ void setup()
     // Create semaphore
     g_xMutex_Signal = xSemaphoreCreateMutex();
     g_xMutex_Sensor = xSemaphoreCreateMutex();
+
+    // Create queue 
+    g_xQueue_RoboCar = xQueueCreate(8, sizeof(int));
 
     // Create FreeRTOS tasks
     xTaskCreatePinnedToCore(Task_line_trace, "Task_line_trace", 2048, NULL, 5, NULL, 0);
