@@ -44,7 +44,8 @@ int g_speed_back = 200;
 int g_speed_rotate = 200;
 int g_speed_turn = 200;
 
-int g_lr_level = 40;
+int g_turn_lr_level = 40;
+int g_rotate_lr_level = 60;
 
 
 //===================================================================
@@ -167,18 +168,21 @@ void RoboCar_control()
             break;
         case RC_CTRL_TURN_FWD_LEFT:
         case RC_CTRL_TURN_BACK_LEFT:
-            MOTOR_set_power_left(g_speed_turn-g_lr_level);
+            MOTOR_set_power_left(g_speed_turn-g_turn_lr_level);
             MOTOR_set_power_right(g_speed_turn);
             break;
         case RC_CTRL_TURN_FWD_RIGHT:
         case RC_CTRL_TURN_BACK_RIGHT:
             MOTOR_set_power_left(g_speed_turn);
-            MOTOR_set_power_right(g_speed_turn-g_lr_level);
+            MOTOR_set_power_right(g_speed_turn-g_turn_lr_level);
             break;
         case RC_CTRL_ROTATE_LEFT:
+            MOTOR_set_power_left(g_speed_rotate-g_rotate_lr_level);
+            MOTOR_set_power_right(g_speed_rotate);
+            break;
         case RC_CTRL_ROTATE_RIGHT:
             MOTOR_set_power_left(g_speed_rotate);
-            MOTOR_set_power_right(g_speed_rotate);
+            MOTOR_set_power_right(g_speed_rotate-g_rotate_lr_level);
             break;
         case RC_CTRL_STOP:
             MOTOR_set_power_left(0);

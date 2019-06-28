@@ -68,7 +68,7 @@ enum {
 // Table of state 
 int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 {
-//                  Left                Foward              Right               Wait                Stop
+//                      Left                Foward              Right               Wait                Stop
 /*XXX*/             STATE_ROTATE_LEFT,  STATE_ROTATE_LEFT,  STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,
 /*XXO*/             STATE_ROTATE_RIGHT, STATE_ROTATE_RIGHT, STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,
 /*XOX*/             STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,
@@ -77,7 +77,7 @@ int g_next_state_table[TRACK_EVENT_NUM][STATE_NUM] =
 /*OXO*/             STATE_ROTATE_LEFT,  STATE_ROTATE_RIGHT, STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_STOP,    
 /*OOX*/             STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,    
 /*OOO_RED*/         STATE_WAIT,         STATE_WAIT,         STATE_WAIT,         STATE_WAIT,         STATE_STOP,
-/*OOO_BLUE*/        STATE_ROTATE_LEFT,   STATE_GO_FORWARD,   STATE_ROTATE_RIGHT,   STATE_WAIT,         STATE_STOP,
+/*OOO_BLUE*/        STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_GO_FORWARD,   STATE_WAIT,         STATE_STOP,
 /*Turned blue*/     STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_ROTATE_RIGHT, STATE_GO_FORWARD,   STATE_STOP,
 /*Stop*/            STATE_STOP,         STATE_STOP,         STATE_STOP,         STATE_STOP,         STATE_STOP,
 /*Start(WF==Off)*/  STATE_ROTATE_LEFT,  STATE_GO_FORWARD,   STATE_ROTATE_RIGHT, STATE_WAIT,         STATE_GO_FORWARD,
@@ -96,10 +96,10 @@ int g_cur_state=STATE_STOP;    // Current state
 int g_signal_wait_flag=0;
 int g_trafic_signal_color = SIGNAL_COLOR_BLUE;
 
-int g_robocar_setting_speed_fwd = 150;
-int g_robocar_setting_speed_back = 150;
-int g_robocar_setting_speed_turn = 150;
-int g_robocar_setting_speed_rotate = 150;
+int g_robocar_setting_speed_fwd = 180;
+int g_robocar_setting_speed_back = 200;
+int g_robocar_setting_speed_turn = 200;
+int g_robocar_setting_speed_rotate = 240;
 int g_robocar_setting_lr_level = 40;
 int g_robocar_slow_down_delta = 50;
 
@@ -155,6 +155,34 @@ void _cmd__speed(int argc, char* argv[])
         RoboCar_set_speed_back(g_robocar_setting_speed_back);
         RoboCar_set_speed_turn(g_robocar_setting_speed_turn);
         RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate);
+    }
+}
+
+void _cmd__speed2(int argc, char* argv[])
+{
+    if(argc > 2) {
+        int speed = atoi(argv[2]);
+        if(strcmp(argv[1], "fwd") == 0) {
+            g_robocar_setting_speed_fwd = speed;
+            RoboCar_set_speed_fwd(g_robocar_setting_speed_fwd);
+        }
+        else if(strcmp(argv[1], "back") == 0) {
+            g_robocar_setting_speed_back = speed;
+            RoboCar_set_speed_back(g_robocar_setting_speed_back);
+        }
+        else if(strcmp(argv[1], "turn") == 0) {
+            g_robocar_setting_speed_turn = speed;
+            RoboCar_set_speed_turn(g_robocar_setting_speed_turn);
+        }
+        else if(strcmp(argv[1], "rotate") == 0) {
+            g_robocar_setting_speed_rotate = speed;
+            RoboCar_set_speed_rotate(g_robocar_setting_speed_rotate);
+        }
+    }
+    else {
+        char txt[128];
+        sprintf(txt, "[Usage] %s fwd/back/turn/rotate speed", argv[0]);
+        g_pSerial->println(txt);
     }
 }
 
@@ -291,6 +319,7 @@ T_command_info  g_command_table[] = {
     {"test",        _cmd__test},
     {"serial",      _cmd__serial},
     {"speed",       _cmd__speed},
+    {"speed2",      _cmd__speed2},
     {"signal",      _cmd__signal},
     {"brightth",    _cmd__brightth},
     {"impactth",    _cmd__impactth},
@@ -392,7 +421,7 @@ int get_next_state(int cur_state, int event)
 //===================================================================
 void Task_RoboCar(void* param)
 {
-    portTickType 	wait_tick = 1/portTICK_RATE_MS; // 1[ms];
+    portTickType 	wait_tick = 10/portTICK_RATE_MS; // 10[ms];
     
     xSemaphoreGive(g_xMutex_Signal);
     xSemaphoreGive(g_xMutex_Sensor);
@@ -488,7 +517,7 @@ void Task_serial_cmd(void* param)
     xSemaphoreGive(g_xMutex_Signal);
     xSemaphoreGive(g_xMutex_Sensor);
     for(;;) {
-        vTaskDelay(10);
+        vTaskDelay(50);
         
         if(g_pSerial->available() > 0) { // received data
             char getstr = g_pSerial->read(); // Read data from serial-port
