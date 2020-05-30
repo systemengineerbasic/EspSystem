@@ -8,6 +8,8 @@
 //==============================================================================
 #include "BluetoothSerial.h"
 #include "my_cmd.h"
+#include <Wire.h>
+#include <RPR-0521RS.h>
 
 
 //---------------------- PIN ----------------------
@@ -89,9 +91,15 @@ int g_cur_state;    // Current state
 int g_trafic_signal_color = SIGNAL_COLOR_RED;
 int g_motor_speed = 200;
 
-Stream* g_pSerial=&SerialBT; // Selected serial port (USB is default)
+Stream* g_pSerial=&Serial; // Selected serial port (USB is default)
 
 SemaphoreHandle_t g_xMutex_Signal = NULL;   // for critical section for signal color
+
+RPR0521RS rpr0521rs;
+
+#define PIN_SDA SDA
+#define PIN_SCL SCL
+
 
 
 //===================================================================
@@ -462,7 +470,12 @@ void setup()
     // Initialize USB serial
     Serial.begin(115200);
     // Initialize Bluetooth serial
-    SerialBT.begin("ESP32-xxxxx");
+    SerialBT.begin("ESP32-12135x");
+
+	Wire.begin(PIN_SDA, PIN_SCL);
+
+	byte rc;
+	rc = rpr0521rs.init();
 
     // Initialize motor
     MOTOR_init();
@@ -491,5 +504,26 @@ void setup()
 void loop() 
 {
     // All proccess should be executed in FreeRTOS tasks.
+	int error;
+	unsigned short ps_val;
+	float als_val;
+
+	error = rpr0521rs.get_psalsval(&ps_val, &als_val);
+	if(error == 0) {
+		// 近接センサー
+		Serial.print("Prox. = ");
+		Serial.print(ps_val);
+		Serial.print("\t||\t");
+		// 照度センサー
+		Serial.print("Bright. = ");
+		Serial.print(als_val);
+
+		Serial.println();
+	}
+	else {
+		Serial.println("[Error] cannot get sensor data.");
+	}
+
+	delay(1000);
 }
 
