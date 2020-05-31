@@ -54,18 +54,10 @@
 #define DAC_CH_LED_WHITE_02     (8)
 #define DAC_CH_LED_BLUE         (9)
 
-// センサーの値を保存するグローバル関数
-float xAccl = 0.00;
-float yAccl = 0.00;
-float zAccl = 0.00;
-float xGyro = 0.00;
-float yGyro = 0.00;
-float zGyro = 0.00;
-int   xMag  = 0;
-int   yMag  = 0;
-int   zMag  = 0;
 
+//---------------------- インスタンス ----------------------
 
+// LEDのインスタンス
 my_led g_led_01(PIN_LED_01, DAC_CH_LED_01);
 my_led g_led_red(PIN_LED_RED, DAC_CH_LED_RED);
 my_led g_led_yellow(PIN_LED_YELLOW, DAC_CH_LED_YELLOW);
@@ -74,11 +66,13 @@ my_led g_led_white_01(PIN_LED_WHITE_01, DAC_CH_LED_WHITE_01);
 my_led g_led_white_02(PIN_LED_WHITE_02, DAC_CH_LED_WHITE_02);
 my_led g_led_blue(PIN_LED_BLUE, DAC_CH_LED_BLUE);
 
+// Pushボタンのインスタンス
 my_button   g_button_01(PIN_BUTTON_01);
 my_button   g_button_red(PIN_BUTTON_RED);
 my_button   g_button_yellow(PIN_BUTTON_YELLOW);
 my_button   g_button_green(PIN_BUTTON_GREEN);
 
+// 照度センサー
 RPR0521RS rpr0521rs;
 
 QueueHandle_t g_xQueue_Serial;
@@ -123,9 +117,10 @@ void osTask_sensor(void* param)
         }
 
 		// 加速度を取得
-        BMX055_Accl();
+		float axl_x, axl_y, axl_z;
+        BMX055_Accl(&axl_x, &axl_y, &axl_z);
 		// 衝撃検出
-		float abs_axl = (xAccl*xAccl + yAccl*yAccl + zAccl*zAccl);
+		float abs_axl = (axl_x*axl_x + axl_y*axl_y + axl_z*axl_z);
 		float diff_axl = abs_axl - pre_abs_axl;
 		pre_abs_axl = abs_axl;
 		float diff = abs(diff_axl);
@@ -263,9 +258,14 @@ void BMX055_Init()
   Wire.write(0x16);  // No. of Repetitions for Z-Axis = 15
   Wire.endTransmission();
 }
+
 //=====================================================================================//
-void BMX055_Accl()
+void BMX055_Accl(float* acc_x, float* acc_y, float* acc_z)
 {
+  float xAccl;
+  float yAccl;
+  float zAccl;
+
   int data[6];
   for (int i = 0; i < 6; i++)
   {
@@ -285,13 +285,19 @@ void BMX055_Accl()
   if (yAccl > 2047)  yAccl -= 4096;
   zAccl = ((data[5] * 256) + (data[4] & 0xF0)) / 16;
   if (zAccl > 2047)  zAccl -= 4096;
-  xAccl = xAccl * 0.0098; // renge +-2g
-  yAccl = yAccl * 0.0098; // renge +-2g
-  zAccl = zAccl * 0.0098; // renge +-2g
+  
+  *acc_x = xAccl * 0.0098; // renge +-2g
+  *acc_y = yAccl * 0.0098; // renge +-2g
+  *acc_z = zAccl * 0.0098; // renge +-2g
 }
+
 //=====================================================================================//
-void BMX055_Gyro()
+void BMX055_Gyro(float* gyro_x, float* gyro_y, float* gyro_z)
 {
+  float xGyro;
+  float yGyro;
+  float zGyro;
+
   int data[6];
   for (int i = 0; i < 6; i++)
   {
@@ -312,13 +318,18 @@ void BMX055_Gyro()
   zGyro = (data[5] * 256) + data[4];
   if (zGyro > 32767)  zGyro -= 65536;
 
-  xGyro = xGyro * 0.0038; //  Full scale = +/- 125 degree/s
-  yGyro = yGyro * 0.0038; //  Full scale = +/- 125 degree/s
-  zGyro = zGyro * 0.0038; //  Full scale = +/- 125 degree/s
+  *gyro_x = xGyro * 0.0038; //  Full scale = +/- 125 degree/s
+  *gyro_y = yGyro * 0.0038; //  Full scale = +/- 125 degree/s
+  *gyro_z = zGyro * 0.0038; //  Full scale = +/- 125 degree/s
 }
+
 //=====================================================================================//
-void BMX055_Mag()
+void BMX055_Mag(float* mag_x, float* mag_y, float* mag_z)
 {
+  int   xMag  = 0;
+  int   yMag  = 0;
+  int   zMag  = 0;
+
   int data[8];
   for (int i = 0; i < 8; i++)
   {
@@ -338,4 +349,8 @@ void BMX055_Mag()
   if (yMag > 4095)  yMag -= 8192;
   zMag = ((data[5] <<8) | (data[4]>>3));
   if (zMag > 16383)  zMag -= 32768;
+  
+  *mag_x = xMag;
+  *mag_y = yMag;
+  *mag_z = zMag;
 }
